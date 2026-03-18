@@ -293,8 +293,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.11169172, y: 0.28705844, z: -0.033721786, w: 0.9507814}
-  m_LocalPosition: {x: 0, y: 37.98295, z: -10}
+  m_LocalRotation: {x: -0.17204149, y: 0.71960914, z: -0.19201839, w: -0.6447429}
+  m_LocalPosition: {x: 31.338123, y: 117.246506, z: 47.16647}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -356,15 +356,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7817cd5ecbb5e284189d7664215d815b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  maxSteps: 470
-  maxDistance: 267
+  maxSteps: 444
+  maxDistance: 400
   distanceForHit: 0.27
   octaves: 5
   persistence: 0.49
   lacunarity: 1.6
   noiseCellScaling: -0.04
   heightMultiplier: 7.13
-  lows: 1.83
+  lows: 1.78
   grassColor: {r: 0.18349235, g: 0.4339623, b: 0.104396574, a: 0}
   waterColor: {r: 0.15744035, g: 0.2886758, b: 0.5471698, a: 0}
   snowColor: {r: 1, g: 1, b: 1, a: 0}
@@ -376,13 +376,10 @@ MonoBehaviour:
   rockLevel: 26.3
   snowLevel: 46.7
   oceanDepth: 0.25
-  mountainRangeHeight: 4.47
+  mountainRangeHeight: 3.19
   mountainRangeContrast: 7.73
   mountainRangeDensity: 0.005
-  roughness: 1.09
-  metallic: 0
-  sunDirection: {x: 1, y: 0.4, z: 0}
-  sunIntensity: 2
+  shadowSoftness: 4
 --- !u!114 &330585549
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -429,7 +426,7 @@ Light:
   serializedVersion: 11
   m_Type: 1
   m_Color: {r: 1, g: 1, b: 1, a: 1}
-  m_Intensity: 2
+  m_Intensity: 3.3
   m_Range: 10
   m_SpotAngle: 30
   m_InnerSpotAngle: 21.80208
@@ -472,7 +469,7 @@ Light:
   m_LightShadowCasterMode: 0
   m_AreaSize: {x: 1, y: 1}
   m_BounceIntensity: 1
-  m_ColorTemperature: 5000
+  m_ColorTemperature: 6207
   m_UseColorTemperature: 1
   m_BoundingSphereOverride: {x: 0, y: 0, z: 0, w: 0}
   m_UseBoundingSphereOverride: 0
@@ -491,7 +488,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 410087039}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.40821788, y: -0.23456968, z: 0.10938163, w: 0.8754261}
+  m_LocalRotation: {x: 0.03900931, y: 0.1614694, z: -0.9391843, w: -0.3005642}
   m_LocalPosition: {x: 0, y: 3, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0

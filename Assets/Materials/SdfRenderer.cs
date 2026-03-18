@@ -7,6 +7,7 @@ public class SdfRenderer : MonoBehaviour
 {
     private ComputeShader marchCS;
     private Camera camera;
+    private Light sun;
 
     [Header("Ray-marching")]
     public int maxSteps = 100;
@@ -44,10 +45,7 @@ public class SdfRenderer : MonoBehaviour
     [Space(10)]
 
     [Header("Terrain shading")]
-    public float roughness = 1;
-    public float metallic = 0;
-    public Vector3 sunDirection;
-    public float sunIntensity = 1;
+    public float shadowSoftness = 1;
 
 
     private void Start()
@@ -55,6 +53,7 @@ public class SdfRenderer : MonoBehaviour
         marchCS = Resources.Load<ComputeShader>("Compute Shaders/TerrainRayMarch");
 
         camera = GetComponent<Camera>();
+        sun = RenderSettings.sun;
     }
     private void Update()
     {
@@ -138,7 +137,9 @@ public class SdfRenderer : MonoBehaviour
         Vector4 sandColorRoughness = new Vector4(sandColor.r, sandColor.g, sandColor.b, 0.8f);
         Vector4 forestColorRoughness = new Vector4(forestColor.r, forestColor.g, forestColor.b, 0.8f);
         Vector4 rockColorRoughness = new Vector4(rockColor.r, rockColor.g, rockColor.b, 0.8f);
-        Vector4 sunDirIntensity = new Vector4(sunDirection.x, sunDirection.y, sunDirection.z, sunIntensity);
+        Vector3 sunDir = sun.transform.forward;
+        Vector3 sunColor = new Vector3(sun.color.r, sun.color.g, sun.color.b);
+        Vector4 sunDirIntensity = new Vector4(sunDir.x, sunDir.y, sunDir.z, sun.intensity);
 
         cmd.SetComputeVectorParam(marchCS, "_GrassColorRoughness", color);
         cmd.SetComputeVectorParam(marchCS, "_WaterColorRoughness", waterColorRoughness);
@@ -154,7 +155,8 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeFloatParam(marchCS, "_ForestLevel", forestLevel);
         cmd.SetComputeFloatParam(marchCS, "_SnowLevel", snowLevel);
         cmd.SetComputeFloatParam(marchCS, "_OceanDepth", oceanDepth);
-        cmd.SetComputeFloatParam(marchCS, "_Metallic", metallic);
         cmd.SetComputeVectorParam(marchCS, "_SunDirectionIntensity", sunDirIntensity);
+        cmd.SetComputeVectorParam(marchCS, "_SunColor", sunColor);
+        cmd.SetComputeFloatParam(marchCS, "_ShadowSoftness", shadowSoftness);
     }
 }
