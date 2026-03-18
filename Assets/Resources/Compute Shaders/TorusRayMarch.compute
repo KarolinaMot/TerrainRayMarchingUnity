@@ -1,0 +1,98 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel Main
+#define MAX_STEPS 100
+#define MAX_DISTANCE 100
+#define SURFACE_DIST 0.001f
+            
+float4x4 _CameraToWorld;
+float4x4 _CameraInverseProjection;
+float3 _WorldSpaceCameraPos;
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> _Result;
+Texture2D<float4> _Source;
+
+
+float GetDistance(float3 p)
+{
+    float d = length(p) - 0.5f;
+    d= length(float2(length(p.xy)-0.5, p.z)) - .1f;
+    return d;
+}
+
+float3 GetNormal(float3 p)
+{
+    float2 offset=float2(1e-2, 0);
+    float3 n = GetDistance(p) - float3(GetDistance(p-offset.xyy),GetDistance(p-offset.yxy), GetDistance(p-offset.yyx));
+    return normalize(n);
+}
+
+float Raymarch(float3 rOrigin, float3 rDirection)
+{
+    float distanceFromOrigin = 0;
+    float distanceFromSurface = 0;
+
+    for(int i=0; i<MAX_STEPS; i++)
+    {
+        float3 p = rOrigin + distanceFromOrigin * rDirection;
+        distanceFromSurface = GetDistance(p);
+
+        distanceFromOrigin +=distanceFromSurface;
+
+        if(distanceFromSurface<SURFACE_DIST || distanceFromOrigin > MAX_DISTANCE)
+        break;
+    }
+
+    return distanceFromOrigin;
+}
+
+[numthreads(16,16,1)]
+void Main (uint3 id : SV_DispatchThreadID)
+{
+    uint width, height;
+    _Result.GetDimensions(width, height);
+
+    if (id.x >= width || id.y >= height)
+        return;
+
+    float2 uv = (float2(id.xy) + 0.5) / float2(width, height);
+
+    // 0..1 -> -1..1
+    float2 ndc = uv * 2.0 - 1.0;
+
+    // Flip Y if needed
+    ndc.y = -ndc.y;
+
+    // Point on the far plane in clip space
+    float4 clipPos = float4(ndc, 1.0, 1.0);
+
+    // Back to view space
+    float4 viewPos = mul(_CameraInverseProjection , clipPos);
+    viewPos /= viewPos.w;
+
+    // Direction in view space
+    float3 rayDirView = normalize(viewPos.xyz);
+
+    // Transform direction to world space
+    float3 rayDirection = normalize(mul((float3x3)_CameraToWorld, rayDirView));
+
+    float3 rayOrigin = _WorldSpaceCameraPos;
+    // // sample the texture
+    float d = Raymarch(rayOrigin, rayDirection);
+    float3 col = 0;
+    if(d<MAX_DISTANCE)
+    {
+        float3 p = rayOrigin + rayDirection * d;
+        float3 n = GetNormal(p);
+        col.rgb = n;
+    }
+    else
+    {
+       uint flippedY = height - 1 - id.y;
+        float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
+        col.rgb = rtColor;
+    }
+
+    _Result[id.xy] = float4(col, 1.0);
+}

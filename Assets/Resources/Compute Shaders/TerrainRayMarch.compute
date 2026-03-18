@@ -1,0 +1,197 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel Main
+
+#include "../Includes/Noise.hlsl"
+#include "../Includes/PBR.hlsl"
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+
+//Ray marching parameters
+int _MaxSteps;
+int _MaxDistance;
+float _DistanceForHit;
+
+//Terrain parameters
+float _CellScaling;
+int _Octaves;
+float _Persistence;
+float _Lacunarity;
+float _HeightMultiplier;
+float _Lows;
+
+//Material values
+float4 _GrassColorRoughness;
+float4 _WaterColorRoughness;
+float4 _SnowColorRoughness;
+float _SeaLevel;
+float _SnowLevel;
+float _Metallic;
+
+//Other
+float4 _SunDirectionIntensity;
+
+RWTexture2D<float4> _Result;
+Texture2D<float4> _Source;
+
+float4x4 _CameraToWorld;
+float4x4 _CameraInverseProjection;
+
+float4 BiomeColor(float height)
+{
+    if (height <= _SeaLevel)
+        return _WaterColorRoughness;
+    else if(height<= _SnowLevel)
+        return _GrassColorRoughness;
+    else
+        return float4(_SnowColorRoughness.rgb, 0.6f);
+}
+
+float TerrainHeight(float2 xz)
+{
+    float value = 0.0;
+    float amplitude = 1;
+    float frequency = _CellScaling;
+    float fudge_factor = 1.2f;
+    float amplitudeSum = 0.0;
+
+    for (int i = 0; i < _Octaves; i++)
+    {
+        float n = Noise::GradientNoise(float3(xz * frequency, 1.0f));
+        value += n * amplitude;
+
+        amplitudeSum += amplitude;
+
+        amplitude *= _Persistence; // e.g. 0.5
+        frequency *= _Lacunarity; // e.g. 2.0
+    }
+    float elevation = (value / amplitudeSum) * _HeightMultiplier;
+    
+    return pow(elevation * fudge_factor, _Lows);
+}
+
+bool IsBelowTerrain(float3 camPos)
+{
+    float h = TerrainHeight(camPos.xz);
+    return camPos.y < h;
+}
+
+float TerrainDistance(float3 p, bool below)
+{
+   float d =  p.y - TerrainHeight(p.xz);
+   
+   if (below)
+        d = -d;
+
+    return d;
+}
+
+float Raymarch(float3 rOrigin, float3 rDirection, bool below, out float terrainHeightAtHit)
+{
+    float distanceFromOrigin = 0;
+    terrainHeightAtHit = 0;
+
+    for (int i = 0; i < _MaxSteps; i++)
+    {
+        float3 p = rOrigin + distanceFromOrigin * rDirection;
+
+        float dist = TerrainDistance(p, below);
+        float h = TerrainHeight(p.xz);
+
+        if (abs(dist) < _DistanceForHit || distanceFromOrigin > _MaxDistance)
+        {
+            terrainHeightAtHit = h;
+            break;
+        }
+
+        distanceFromOrigin += max(abs(dist) * 0.25, 0.01);
+    }
+
+    return distanceFromOrigin;
+}
+
+
+float3 GetNormal(float3 p, bool below)
+{
+    float e = 0.01;
+
+    float3 n = float3(
+        TerrainDistance(p + float3(e, 0, 0), below) - TerrainDistance(p - float3(e, 0, 0), below),
+        TerrainDistance(p + float3(0, e, 0), below) - TerrainDistance(p - float3(0, e, 0), below),
+        TerrainDistance(p + float3(0, 0, e), below) - TerrainDistance(p - float3(0, 0, e), below)
+    );
+
+    n = normalize(n);
+
+    return below ? -n : n;
+}
+
+[numthreads(16,16,1)]
+void Main (uint3 id : SV_DispatchThreadID)
+{
+    uint width, height;
+    _Result.GetDimensions(width, height);
+
+    if (id.x >= width || id.y >= height)
+        return;
+
+    float2 uv = (float2(id.xy) + 0.5) / float2(width, height);
+
+    // 0..1 -> -1..1
+    float2 ndc = uv * 2.0 - 1.0;
+
+    // Flip Y if needed
+    ndc.y = -ndc.y;
+
+    // Point on the far plane in clip space
+    float4 clipPos = float4(ndc, 1.0, 1.0);
+
+    // Back to view space
+    float4 viewPos = mul(_CameraInverseProjection, clipPos);
+    viewPos /= viewPos.w;
+
+    // Direction in view space
+    float3 rayDirView = normalize(viewPos.xyz);
+
+    // Transform direction to world space
+    float3 rayDirection = normalize(mul((float3x3) _CameraToWorld, rayDirView));
+
+    float3 cameraPos = _WorldSpaceCameraPos;
+    
+    bool belowTerrain = IsBelowTerrain(cameraPos);
+    float elevation = 0;
+    
+    float d = Raymarch(cameraPos, rayDirection, belowTerrain, elevation);
+    float3 col = 0;
+    if (d < _MaxDistance)
+    {
+
+        float3 p = cameraPos + rayDirection * d;
+        float3 n = (GetNormal(p, belowTerrain) + 1.f) * 0.5f;
+        float4 biomeValue = BiomeColor(elevation);
+        
+        PBRMaterial mat;
+        mat.baseColor = biomeValue.rgb;
+        mat.roughness = biomeValue.a;
+        mat.metallic = _Metallic;
+        mat.normal = n;
+        mat.F0 = float3(0.02, 0.02, 0.02);
+        mat.F0 = lerp(mat.F0, mat.baseColor.rgb, mat.metallic);
+        mat.diffuse = lerp(mat.baseColor.rgb, float3(0.0, 0.0, 0.0), mat.metallic);
+        float3 viewDirection = normalize(cameraPos - p);
+        
+        float3 diffuse = 0.f;
+        float3 specular = 0.f;
+        GetBRDF(mat, viewDirection, normalize(_SunDirectionIntensity.xyz), float3(1.f, 1.f, 1.f), _SunDirectionIntensity.w, 1.f, diffuse, specular);
+        
+        col.rgb = diffuse+specular;
+    }
+    else
+    {
+        uint flippedY = height - 1 - id.y;
+        float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
+        col.rgb = rtColor;
+    }
+
+    _Result[id.xy] = float4(col, 1.0);
+}
