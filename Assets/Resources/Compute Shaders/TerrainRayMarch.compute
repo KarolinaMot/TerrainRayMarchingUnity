@@ -20,12 +20,24 @@ float _Lacunarity;
 float _HeightMultiplier;
 float _Lows;
 
+float _MountainRangeHeight;
+float _MountainRangeContrast;
+float _MountainRangeDensity;
+
 //Material values
 float4 _GrassColorRoughness;
 float4 _WaterColorRoughness;
 float4 _SnowColorRoughness;
-float _SeaLevel;
+float4 _SandColorRoughness;
+float4 _ForestColorRoughness;
+float4 _RockColorRoughness;
+
+float _GrassLevel;
+float _ForestLevel;
+float _RockLevel;
 float _SnowLevel;
+float _OceanDepth;
+
 float _Metallic;
 
 //Other
@@ -39,35 +51,107 @@ float4x4 _CameraInverseProjection;
 
 float4 BiomeColor(float height)
 {
-    if (height <= _SeaLevel)
+    if (height <= 0.001f)
         return _WaterColorRoughness;
-    else if(height<= _SnowLevel)
+    if (height < _GrassLevel)
+        return _SandColorRoughness;
+    else if (height <= _ForestLevel)
         return _GrassColorRoughness;
+    else if (height <= _RockLevel)
+        return _ForestColorRoughness;
+    else if (height <= _SnowLevel)
+        return _RockColorRoughness;
     else
         return float4(_SnowColorRoughness.rgb, 0.6f);
 }
 
 float TerrainHeight(float2 xz)
 {
-    float value = 0.0;
-    float amplitude = 1;
-    float frequency = _CellScaling;
-    float fudge_factor = 1.2f;
-    float amplitudeSum = 0.0;
-
-    for (int i = 0; i < _Octaves; i++)
-    {
-        float n = Noise::GradientNoise(float3(xz * frequency, 1.0f));
-        value += n * amplitude;
-
-        amplitudeSum += amplitude;
-
-        amplitude *= _Persistence; // e.g. 0.5
-        frequency *= _Lacunarity; // e.g. 2.0
-    }
-    float elevation = (value / amplitudeSum) * _HeightMultiplier;
+    float elevation = 0.f;
+    float mountainRange = 0.f;
+    float oceanNoise = 0.f;
     
-    return pow(elevation * fudge_factor, _Lows);
+    //Mountain ranges noise
+    {
+        float value = 0.0;
+        float amplitude = 1;
+        float frequency = _MountainRangeDensity;
+        float fudge_factor = 1.2f;
+        float amplitudeSum = 0.0;
+
+        for (int i = 0; i < 5; i++)
+        {
+            float n = Noise::GradientNoise(float3(xz * frequency, 1.0f));
+            value += n * amplitude;
+
+            amplitudeSum += amplitude;
+
+            amplitude *= 0.2f; // e.g. 0.5
+            frequency *= 5.0f; // e.g. 2.0
+        }
+        
+        
+        mountainRange = (value / amplitudeSum);
+        mountainRange = saturate((mountainRange - 0.5) * _MountainRangeContrast + 0.5);
+        mountainRange *= _MountainRangeHeight;
+
+    }
+    
+    //Ocean noise
+    {
+        float value = 0.0;
+        float amplitude = 1;
+        float frequency = 0.25f;
+        float fudge_factor = 1.2f;
+        float amplitudeSum = 0.0;
+
+        for (int i = 0; i < 5; i++)
+        {
+            float n = Noise::GradientNoise(float3(xz * frequency, 1.0f));
+            value += n * amplitude;
+
+            amplitudeSum += amplitude;
+
+            amplitude *= 0.2f; // e.g. 0.5
+            frequency *= 5.0f; // e.g. 2.0
+        }
+        
+        oceanNoise = (value / amplitudeSum);
+        oceanNoise *= -1;
+
+    }
+    
+    //Main Noise
+    {
+        float value = 0.0;
+        float amplitude = 1;
+        float frequency = _CellScaling;
+        float fudge_factor = 1.2f;
+        float amplitudeSum = 0.0;
+
+        for (int i = 0; i < _Octaves; i++)
+        {
+            float n = Noise::GradientNoise(float3(xz * frequency, 1.0f));
+            value += n * amplitude;
+
+            amplitudeSum += amplitude;
+
+            amplitude *= _Persistence; // e.g. 0.5
+            frequency *= _Lacunarity; // e.g. 2.0
+        }
+        
+        elevation = (value / amplitudeSum) * _HeightMultiplier;
+        elevation = pow(elevation * fudge_factor, _Lows);
+
+    }
+    
+    float totaElevation = elevation * mountainRange;
+    
+    if (totaElevation > 0.001f)
+        oceanNoise = 0;
+    
+    
+    return totaElevation + oceanNoise;
 }
 
 bool IsBelowTerrain(float3 camPos)
@@ -88,26 +172,45 @@ float TerrainDistance(float3 p, bool below)
 
 float Raymarch(float3 rOrigin, float3 rDirection, bool below, out float terrainHeightAtHit)
 {
-    float distanceFromOrigin = 0;
-    terrainHeightAtHit = 0;
+    
+    float t = 0.0;
+    terrainHeightAtHit = 0.0;
+
+    float prevDist = 0.0;
+    bool hasPrev = false;
 
     for (int i = 0; i < _MaxSteps; i++)
     {
-        float3 p = rOrigin + distanceFromOrigin * rDirection;
-
-        float dist = TerrainDistance(p, below);
+        float3 p = rOrigin + rDirection * t;
         float h = TerrainHeight(p.xz);
+        float dist = p.y - h;
 
-        if (abs(dist) < _DistanceForHit || distanceFromOrigin > _MaxDistance)
+        if (below)
+            dist = -dist;
+
+        if (abs(dist) < _DistanceForHit)
         {
             terrainHeightAtHit = h;
-            break;
+            return t;
         }
 
-        distanceFromOrigin += max(abs(dist) * 0.25, 0.01);
+        if (hasPrev && prevDist > 0.0 && dist < 0.0)
+        {
+            // crossed the surface between previous step and current step
+            terrainHeightAtHit = h;
+            return t;
+        }
+
+        prevDist = dist;
+        hasPrev = true;
+
+        t += max(abs(dist) * 0.2, 0.01);
+
+        if (t > _MaxDistance)
+            break;
     }
 
-    return distanceFromOrigin;
+    return t;
 }
 
 

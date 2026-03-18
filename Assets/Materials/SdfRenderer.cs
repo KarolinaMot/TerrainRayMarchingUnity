@@ -28,8 +28,19 @@ public class SdfRenderer : MonoBehaviour
     public Color grassColor;
     public Color waterColor;
     public Color snowColor;
-    public float seaLevel;
+    public Color sandColor;
+    public Color forestColor;
+    public Color rockColor;
+    [Space(5)]
+    public float grassLevel;
+    public float forestLevel;
+    public float rockLevel;
     public float snowLevel;
+    public float oceanDepth;
+    [Space(5)]
+    public float mountainRangeHeight = 1;
+    public float mountainRangeContrast = 1;
+    public float mountainRangeDensity = 0.02f;
     [Space(10)]
 
     [Header("Terrain shading")]
@@ -124,13 +135,25 @@ public class SdfRenderer : MonoBehaviour
         Vector4 color = new Vector4(grassColor.r, grassColor.g, grassColor.b, 0.8f);
         Vector4 waterColorRoughness = new Vector4(waterColor.r, waterColor.g, waterColor.b, 0.25f);
         Vector4 snowColorRoughness = new Vector4(snowColor.r, snowColor.g, snowColor.b, 0.5f);
+        Vector4 sandColorRoughness = new Vector4(sandColor.r, sandColor.g, sandColor.b, 0.8f);
+        Vector4 forestColorRoughness = new Vector4(forestColor.r, forestColor.g, forestColor.b, 0.8f);
+        Vector4 rockColorRoughness = new Vector4(rockColor.r, rockColor.g, rockColor.b, 0.8f);
         Vector4 sunDirIntensity = new Vector4(sunDirection.x, sunDirection.y, sunDirection.z, sunIntensity);
 
         cmd.SetComputeVectorParam(marchCS, "_GrassColorRoughness", color);
         cmd.SetComputeVectorParam(marchCS, "_WaterColorRoughness", waterColorRoughness);
         cmd.SetComputeVectorParam(marchCS, "_SnowColorRoughness", snowColorRoughness);
-        cmd.SetComputeFloatParam(marchCS, "_SeaLevel", seaLevel);
+        cmd.SetComputeVectorParam(marchCS, "_SandColorRoughness", sandColorRoughness);
+        cmd.SetComputeVectorParam(marchCS, "_ForestColorRoughness", forestColorRoughness);
+        cmd.SetComputeVectorParam(marchCS, "_RockColorRoughness", rockColorRoughness);
+        cmd.SetComputeFloatParam(marchCS, "_GrassLevel", grassLevel);
+        cmd.SetComputeFloatParam(marchCS, "_MountainRangeHeight", mountainRangeHeight);
+        cmd.SetComputeFloatParam(marchCS, "_MountainRangeContrast", mountainRangeContrast);
+        cmd.SetComputeFloatParam(marchCS, "_MountainRangeDensity", mountainRangeDensity);
+        cmd.SetComputeFloatParam(marchCS, "_RockLevel", rockLevel);
+        cmd.SetComputeFloatParam(marchCS, "_ForestLevel", forestLevel);
         cmd.SetComputeFloatParam(marchCS, "_SnowLevel", snowLevel);
+        cmd.SetComputeFloatParam(marchCS, "_OceanDepth", oceanDepth);
         cmd.SetComputeFloatParam(marchCS, "_Metallic", metallic);
         cmd.SetComputeVectorParam(marchCS, "_SunDirectionIntensity", sunDirIntensity);
     }
