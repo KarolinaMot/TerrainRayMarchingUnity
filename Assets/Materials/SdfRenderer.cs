@@ -35,6 +35,7 @@ public class SdfRenderer : MonoBehaviour
 
     [Header("Terrain shading")]
     public float shadowSoftness = 1;
+    public float shadowSteps = 1024;
 
 
     private void Start()
@@ -146,5 +147,6 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeFloatParam(marchCS, "_ShadowSoftness", shadowSoftness);
         cmd.SetComputeFloatParam(marchCS, "_ChunkSize", noiseGen.chunkSize);
         cmd.SetComputeVectorParam(marchCS, "_ChunkCoord", new Vector2(0f,0f));
+        cmd.SetComputeFloatParam(marchCS, "_ShadowSteps", shadowSteps);
     }
 }

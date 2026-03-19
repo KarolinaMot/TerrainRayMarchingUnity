@@ -47,13 +47,11 @@ public class NoiseGeneration : MonoBehaviour
 
     void Update()
     {
-        //if (Input.GetKeyDown(KeyCode.Space)) // press Space
-        //{
-            //RunCompute();
-        //}
+
     }
 
     // Update is called once per frame
+    [ContextMenu("Generate Noise")]
     void RunCompute()
     {
         int kernel = noiseCS.FindKernel("Main");

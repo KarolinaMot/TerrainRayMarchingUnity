@@ -3,7 +3,7 @@
 
 #include "../Includes/Noise.hlsl"
 #include "../Includes/PBR.hlsl"
-#define AMBIENT_INTENSITY 0.f
+#define AMBIENT_INTENSITY 0.2f
 // Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
 
@@ -33,6 +33,7 @@ float _OceanDepth;
 
 float _Metallic;
 float _ShadowSoftness;
+float _ShadowSteps;
 
 //Other
 float4 _SunDirectionIntensity;
@@ -107,8 +108,8 @@ float Shadow(float3 ro, float3 rd, float mint, float maxt)
     float t = mint;
     float res = 1.0f;
 
-    const int steps = 300;
-    const float thickness = 0.2f;
+    const int steps = _ShadowSteps;
+    const float thickness = -5.f;
 
     for (int i = 0; i < steps && t < maxt; i++)
     {
@@ -120,11 +121,12 @@ float Shadow(float3 ro, float3 rd, float mint, float maxt)
             return AMBIENT_INTENSITY;
 
         res = min(res, _ShadowSoftness * (h - thickness) / max(t, 1e-3f));
-
-        t += 0.1f;
+        float stepSize = clamp(t * 0.2f, 0.05f, 2.f);
+        t += stepSize;
     }
 
     return saturate(res + AMBIENT_INTENSITY);
+    //return 1.f;
 }
 
 float Raymarch(float3 rOrigin, float3 rDirection, bool below, out float terrainHeightAtHit)
