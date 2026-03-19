@@ -2,12 +2,14 @@ using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.XR;
+using static Unity.VisualScripting.Member;
 
 public class SdfRenderer : MonoBehaviour
 {
     private ComputeShader marchCS;
     private Camera camera;
     private Light sun;
+    private NoiseGeneration noiseGen;
 
     [Header("Ray-marching")]
     public int maxSteps = 100;
@@ -15,15 +17,6 @@ public class SdfRenderer : MonoBehaviour
     public float distanceForHit = 0.001f;
     [Space(10)]
 
-
-    [Header("Terrain generation")]
-    public int octaves = 1;
-    public float persistence = 0.5f;
-    public float lacunarity = 4.0f;
-    public float noiseCellScaling = 1;
-    public float heightMultiplier = 1;
-    public float lows = 1;
-    [Space(10)]
 
     [Header("Biomes")]
     public Color grassColor;
@@ -38,10 +31,6 @@ public class SdfRenderer : MonoBehaviour
     public float rockLevel;
     public float snowLevel;
     public float oceanDepth;
-    [Space(5)]
-    public float mountainRangeHeight = 1;
-    public float mountainRangeContrast = 1;
-    public float mountainRangeDensity = 0.02f;
     [Space(10)]
 
     [Header("Terrain shading")]
@@ -53,13 +42,20 @@ public class SdfRenderer : MonoBehaviour
         marchCS = Resources.Load<ComputeShader>("Compute Shaders/TerrainRayMarch");
 
         camera = GetComponent<Camera>();
+        noiseGen = GetComponent<NoiseGeneration>();
         sun = RenderSettings.sun;
     }
     private void Update()
     {
+        if (!noiseGen)
+        {
+            Debug.LogError("Noise generator not found");
+            return;
+        }
+
         CommandBuffer cmd = new CommandBuffer()
         {
-            name = "My Cmd Buffer"
+            name = "My Cmd Buffer2"
         };
 
         int kernel = marchCS.FindKernel("Main");
@@ -75,7 +71,7 @@ public class SdfRenderer : MonoBehaviour
         desc.enableRandomWrite = true;
         desc.graphicsFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.B10G11R11_UFloatPack32;
 
-        int rt = Shader.PropertyToID("_TmpRT ");
+        int rt = Shader.PropertyToID("_TmpRT");
         cmd.GetTemporaryRT(rt, desc);
         RenderTargetIdentifier rtId = new RenderTargetIdentifier(rt, 0, CubemapFace.Unknown, -1);
         cmd.SetComputeTextureParam(marchCS, kernel, "_Result", rtId);
@@ -122,14 +118,7 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeIntParam(marchCS, "_MaxSteps", maxSteps);
         cmd.SetComputeIntParam(marchCS, "_MaxDistance", maxDistance);
         cmd.SetComputeFloatParam(marchCS, "_DistanceForHit", distanceForHit);
-
-        cmd.SetComputeFloatParam(marchCS, "_CellScaling", noiseCellScaling);
-        cmd.SetComputeIntParam(marchCS, "_Octaves", octaves);
-        cmd.SetComputeFloatParam(marchCS, "_HeightMultiplier", heightMultiplier);
-        cmd.SetComputeFloatParam(marchCS, "_Persistence", persistence);
-        cmd.SetComputeFloatParam(marchCS, "_Lacunarity", lacunarity);
-        cmd.SetComputeFloatParam(marchCS, "_HeightMultiplier", heightMultiplier);
-        cmd.SetComputeFloatParam(marchCS, "_Lows", lows);
+        cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMap", noiseGen.heightmap);
 
         Vector4 color = new Vector4(grassColor.r, grassColor.g, grassColor.b, 0.8f);
         Vector4 waterColorRoughness = new Vector4(waterColor.r, waterColor.g, waterColor.b, 0.25f);
@@ -148,9 +137,6 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeVectorParam(marchCS, "_ForestColorRoughness", forestColorRoughness);
         cmd.SetComputeVectorParam(marchCS, "_RockColorRoughness", rockColorRoughness);
         cmd.SetComputeFloatParam(marchCS, "_GrassLevel", grassLevel);
-        cmd.SetComputeFloatParam(marchCS, "_MountainRangeHeight", mountainRangeHeight);
-        cmd.SetComputeFloatParam(marchCS, "_MountainRangeContrast", mountainRangeContrast);
-        cmd.SetComputeFloatParam(marchCS, "_MountainRangeDensity", mountainRangeDensity);
         cmd.SetComputeFloatParam(marchCS, "_RockLevel", rockLevel);
         cmd.SetComputeFloatParam(marchCS, "_ForestLevel", forestLevel);
         cmd.SetComputeFloatParam(marchCS, "_SnowLevel", snowLevel);
@@ -158,5 +144,7 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeVectorParam(marchCS, "_SunDirectionIntensity", sunDirIntensity);
         cmd.SetComputeVectorParam(marchCS, "_SunColor", sunColor);
         cmd.SetComputeFloatParam(marchCS, "_ShadowSoftness", shadowSoftness);
+        cmd.SetComputeFloatParam(marchCS, "_ChunkSize", noiseGen.chunkSize);
+        cmd.SetComputeVectorParam(marchCS, "_ChunkCoord", new Vector2(0f,0f));
     }
 }

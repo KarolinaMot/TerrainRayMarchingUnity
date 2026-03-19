@@ -3,7 +3,7 @@
 
 #include "../Includes/Noise.hlsl"
 #include "../Includes/PBR.hlsl"
-#define AMBIENT_INTENSITY 0.4f
+#define AMBIENT_INTENSITY 0.f
 // Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
 
@@ -12,17 +12,10 @@ int _MaxSteps;
 int _MaxDistance;
 float _DistanceForHit;
 
-//Terrain parameters
-float _CellScaling;
-int _Octaves;
-float _Persistence;
-float _Lacunarity;
-float _HeightMultiplier;
-float _Lows;
-
-float _MountainRangeHeight;
-float _MountainRangeContrast;
-float _MountainRangeDensity;
+//Heightmap and info
+Texture2D<float> _HeightMap;
+float _ChunkSize;
+float2 _ChunkCoord;
 
 //Material values
 float4 _GrassColorRoughness;
@@ -45,6 +38,7 @@ float _ShadowSoftness;
 float4 _SunDirectionIntensity;
 float3 _SunColor;
 
+SamplerState sampler_HeightMap;
 RWTexture2D<float4> _Result;
 Texture2D<float4> _Source;
 
@@ -67,98 +61,34 @@ float4 BiomeColor(float height)
         return float4(_SnowColorRoughness.rgb, 0.6f);
 }
 
+bool IsInsideChunk(float2 worldXZ)
+{
+    float2 chunkMin = _ChunkCoord * _ChunkSize;
+    float2 chunkMax = chunkMin + _ChunkSize;
+
+    return worldXZ.x >= chunkMin.x && worldXZ.x <= chunkMax.x &&
+           worldXZ.y >= chunkMin.y && worldXZ.y <= chunkMax.y;
+}
+
 float TerrainHeight(float2 xz)
 {
-    float elevation = 0.f;
-    float mountainRange = 0.f;
-    float oceanNoise = 0.f;
-    
-    //Mountain ranges noise
-    {
-        float value = 0.0;
-        float amplitude = 1;
-        float frequency = _MountainRangeDensity;
-        float fudge_factor = 1.2f;
-        float amplitudeSum = 0.0;
+    float2 chunkOffset = _ChunkCoord * _ChunkSize;
+    float2 localXZ = xz - chunkOffset;
+    float2 uv = localXZ / _ChunkSize;
 
-        for (int i = 0; i < 4; i++)
-        {
-            float n = Noise::GradientNoise(float3(xz * frequency, 1.0f));
-            value += n * amplitude;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+        return -1e20f; // no terrain here
 
-            amplitudeSum += amplitude;
-
-            amplitude *= 0.2f; // e.g. 0.5
-            frequency *= 5.0f; // e.g. 2.0
-        }
-        
-        
-        mountainRange = (value / amplitudeSum);
-        mountainRange = saturate((mountainRange - 0.5) * _MountainRangeContrast + 0.5);
-        mountainRange *= _MountainRangeHeight;
-
-    }
-    
-    //Ocean noise
-    {
-        float value = 0.0;
-        float amplitude = 1;
-        float frequency = 0.25f;
-        float fudge_factor = 1.2f;
-        float amplitudeSum = 0.0;
-
-        for (int i = 0; i < 1; i++)
-        {
-            float n = Noise::GradientNoise(float3(xz * frequency, 1.0f));
-            value += n * amplitude;
-
-            amplitudeSum += amplitude;
-
-            amplitude *= 0.2f; // e.g. 0.5
-            frequency *= 5.0f; // e.g. 2.0
-        }
-        
-        oceanNoise = (value / amplitudeSum);
-        oceanNoise *= -1;
-
-    }
-    
-    //Main Noise
-    {
-        float value = 0.0;
-        float amplitude = 1;
-        float frequency = _CellScaling;
-        float fudge_factor = 1.2f;
-        float amplitudeSum = 0.0;
-
-        for (int i = 0; i < _Octaves; i++)
-        {
-            float n = Noise::GradientNoise(float3(xz * frequency, 1.0f));
-            value += n * amplitude;
-
-            amplitudeSum += amplitude;
-
-            amplitude *= _Persistence; // e.g. 0.5
-            frequency *= _Lacunarity; // e.g. 2.0
-        }
-        
-        elevation = (value / amplitudeSum) * _HeightMultiplier;
-        elevation = pow(elevation * fudge_factor, _Lows);
-
-    }
-    
-    float totaElevation = elevation * mountainRange;
-    
-    if (totaElevation > 0.001f)
-        oceanNoise = 0;
-    
-    
-    return totaElevation + oceanNoise;
+    return _HeightMap.SampleLevel(sampler_HeightMap, uv, 0);
 }
 
 bool IsBelowTerrain(float3 camPos)
 {
     float h = TerrainHeight(camPos.xz);
+
+    if (h < -1e10f)
+        return false;
+
     return camPos.y < h;
 }
 
@@ -199,7 +129,6 @@ float Shadow(float3 ro, float3 rd, float mint, float maxt)
 
 float Raymarch(float3 rOrigin, float3 rDirection, bool below, out float terrainHeightAtHit)
 {
-    
     float t = 0.0;
     terrainHeightAtHit = 0.0;
 
@@ -209,6 +138,11 @@ float Raymarch(float3 rOrigin, float3 rDirection, bool below, out float terrainH
     for (int i = 0; i < _MaxSteps; i++)
     {
         float3 p = rOrigin + rDirection * t;
+
+        // 🚨 LEFT CHUNK → no terrain here
+        if (!IsInsideChunk(p.xz))
+            return _MaxDistance;
+
         float h = TerrainHeight(p.xz);
         float dist = p.y - h;
 
@@ -223,7 +157,6 @@ float Raymarch(float3 rOrigin, float3 rDirection, bool below, out float terrainH
 
         if (hasPrev && prevDist > 0.0 && dist < 0.0)
         {
-            // crossed the surface between previous step and current step
             terrainHeightAtHit = h;
             return t;
         }
@@ -237,9 +170,8 @@ float Raymarch(float3 rOrigin, float3 rDirection, bool below, out float terrainH
             break;
     }
 
-    return t;
+    return _MaxDistance; // no hit
 }
-
 
 float3 GetNormal(float3 p, bool below)
 {
@@ -319,8 +251,9 @@ void Main (uint3 id : SV_DispatchThreadID)
         GetBRDF(mat, viewDirection, viewDirection, ambientColor, AMBIENT_INTENSITY, 1.f, diffuse, specular);
         
         float shadow = Shadow(p + n * 0.02f, sunDir, 0.01f, 2000.f);
-        col.rgb = diffuse+specular;
+        col.rgb = diffuse + specular;
         col.rgb *= shadow;
+        //col = mat.baseColor;
     }
     else
     {
@@ -328,6 +261,6 @@ void Main (uint3 id : SV_DispatchThreadID)
         float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
         col.rgb = rtColor;
     }
-
+    
     _Result[id.xy] = float4(col, 1.0);
 }

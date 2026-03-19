@@ -1,0 +1,128 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel Main
+#include "../Includes/Noise.hlsl"
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float> _HeightMap;
+int _ChunkResolution;
+float _ChunkSize;
+float2 _ChunkCoord;
+
+
+//Terrain parameters
+float _CellScaling;
+int _Octaves;
+float _Persistence;
+float _Lacunarity;
+float _HeightMultiplier;
+float _Lows;
+
+float _MountainRangeHeight;
+float _MountainRangeContrast;
+float _MountainRangeDensity;
+
+
+float TerrainNoise(float2 xz)
+{
+    float elevation = 0.f;
+    float mountainRange = 0.f;
+    float oceanNoise = 0.f;
+    
+    //Mountain ranges noise
+    {
+        float value = 0.0f;
+        float amplitude = 1.f;
+        float frequency = _MountainRangeDensity;
+        float fudge_factor = 1.2f;
+        float amplitudeSum = 0.0;
+
+        for (int i = 0; i < 4; i++)
+        {
+            float n = Noise::GradientNoise(float3(xz * frequency, 1.0f));
+            value += n * amplitude;
+
+            amplitudeSum += amplitude;
+
+            amplitude *= 0.2f; // e.g. 0.5
+            frequency *= 5.0f; // e.g. 2.0
+        }
+        
+        mountainRange = (value / amplitudeSum);
+        mountainRange = saturate((mountainRange - 0.5) * _MountainRangeContrast + 0.5);
+        mountainRange *= _MountainRangeHeight;
+
+    }
+    
+    //Ocean noise
+    {
+        float value = 0.0;
+        float amplitude = 1;
+        float frequency = 0.25f;
+        float fudge_factor = 1.2f;
+        float amplitudeSum = 0.0;
+
+        for (int i = 0; i < 1; i++)
+        {
+            float n = Noise::GradientNoise(float3(xz * frequency, 1.0f));
+            value += n * amplitude;
+
+            amplitudeSum += amplitude;
+
+            amplitude *= 0.2f; // e.g. 0.5
+            frequency *= 5.0f; // e.g. 2.0
+        }
+        
+        oceanNoise = (value / amplitudeSum);
+        oceanNoise *= -1;
+
+    }
+    
+    //Main Noise
+    {
+        float value = 0.0;
+        float amplitude = 1;
+        float frequency = _CellScaling;
+        float fudge_factor = 1.2f;
+        float amplitudeSum = 0.0;
+
+        for (int i = 0; i < _Octaves; i++)
+        {
+            float n = Noise::GradientNoise(float3(xz * frequency, 1.0f));
+            value += n * amplitude;
+
+            amplitudeSum += amplitude;
+
+            amplitude *= _Persistence; // e.g. 0.5
+            frequency *= _Lacunarity; // e.g. 2.0
+        }
+        
+        elevation = (value / amplitudeSum) * _HeightMultiplier;
+        elevation = pow(elevation * fudge_factor, _Lows);
+
+    }
+    
+    float totaElevation = elevation * mountainRange;
+    
+    if (totaElevation > 0.001f)
+        oceanNoise = 0;
+    
+    //float n = Noise::GradientNoise(float3(xz * _CellScaling, 1.0f));
+
+    return totaElevation + oceanNoise;
+}
+
+[numthreads(16,16,1)]
+void Main (uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _ChunkResolution || id.y >= _ChunkResolution)
+        return;
+
+    float step = _ChunkSize / (_ChunkResolution - 1);
+
+    float2 local = id.xy * step;
+    float2 world = _ChunkCoord * _ChunkSize + local;
+    float height = TerrainNoise(world);
+
+    _HeightMap[id.xy] = height;
+}
