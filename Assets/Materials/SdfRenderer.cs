@@ -209,7 +209,8 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeFloatParam(marchCS, "_OceanDepth", oceanDepth);
         cmd.SetComputeVectorParam(marchCS, "_SunDirectionIntensity", sunDirIntensity);
         cmd.SetComputeVectorParam(marchCS, "_SunColor", sunColor);
-        cmd.SetComputeFloatParam(marchCS, "_ShadowSoftness", sun.cookieSize);
+        cmd.SetComputeFloatParam(marchCS, "_SunAngularRadius", sunAngularRadius);
+        cmd.SetComputeFloatParam(marchCS, "_ChunkSize", noiseGen.chunkSize);
         cmd.SetComputeFloatParam(marchCS, "_ChunkSize", noiseGen.chunkSize);
         cmd.SetComputeVectorParam(marchCS, "_ChunkCoord", new Vector2(0f,0f));
         cmd.SetComputeFloatParam(marchCS, "_ShadowSteps", shadowSteps);
@@ -218,6 +219,5 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeIntParam(marchCS, "_UsePathtracedShadows", pathTracedShadows ? 1 : 0);
         cmd.SetComputeTextureParam(marchCS, kernel, "_TemporalShadow", temporalShadow[Time.frameCount % 2]);
         cmd.SetComputeTextureParam(marchCS, kernel, "_TemporalShadowPrev", temporalShadow[(Time.frameCount + 1) % 2]);
-        cmd.SetComputeTextureParam(marchCS, kernel, "_BlueNoise", GetComponent<ShaderInputs>().blueNoise);
     }
 }

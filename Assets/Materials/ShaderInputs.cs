@@ -17,6 +17,7 @@ public class ShaderInputs : MonoBehaviour
         Shader.SetGlobalInt("_Fps", (int)(1.0f / Time.deltaTime));
         Shader.SetGlobalFloat("_DeltaTime", Time.deltaTime);
         Shader.SetGlobalFloat("_DSimTime", Time.time);
+        Shader.SetGlobalTexture("_BlueNoise64", blueNoise);
 
     }
 }
