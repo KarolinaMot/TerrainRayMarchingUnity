@@ -128,7 +128,7 @@ float Shadow(float3 ro, float3 rd, float mint, float maxt)
             return AMBIENT_INTENSITY;
 
         res = min(res, _SunAngularRadius * (h - thickness) / max(t, 1e-3f));
-        float stepSize = clamp(t * 0.2f, 0.05f, 2.f);
+        float stepSize = clamp(t * 10.f, 0.05f, 20.f);
         t += stepSize;
     }
 
@@ -184,7 +184,6 @@ float Raymarch(float3 rOrigin, float3 rDirection, bool below, out float terrainH
     {
         float3 p = rOrigin + rDirection * t;
 
-        // 🚨 LEFT CHUNK → no terrain here
         if (!IsInsideChunk(p.xz))
             return _MaxDistance;
 
@@ -200,7 +199,7 @@ float Raymarch(float3 rOrigin, float3 rDirection, bool below, out float terrainH
             return t;
         }
 
-        if (hasPrev && prevDist > 0.0 && dist < 0.0)
+        if (hasPrev && prevDist > 0.0f && dist < 0.0f)
         {
             terrainHeightAtHit = h;
             return t;
@@ -209,13 +208,14 @@ float Raymarch(float3 rOrigin, float3 rDirection, bool below, out float terrainH
         prevDist = dist;
         hasPrev = true;
 
-        t += max(abs(dist) * 0.2, 0.01);
+        float stepSize = clamp(abs(dist) * 0.25f, 0.02f, 20.0f);
+        t += stepSize;
 
         if (t > _MaxDistance)
             break;
     }
 
-    return _MaxDistance; // no hit
+    return _MaxDistance;
 }
 
 void MakeOrthonormalBasis(float3 n, out float3 t, out float3 b)
@@ -281,7 +281,7 @@ float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims
                 break;
             }
 
-            float stepSize = clamp(t * 0.2f, 0.05f, 2.0f);
+            float stepSize = clamp(t * 10.f, 0.05f, 20.f);
             t += stepSize;
         }
 
@@ -294,15 +294,17 @@ float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims
 
 float3 GetNormal(float3 p, bool below)
 {
-    float e = 0.01;
+    float e = 0.1f; // tune based on your world scale
 
-    float3 n = float3(
-        TerrainDistance(p + float3(e, 0, 0), below) - TerrainDistance(p - float3(e, 0, 0), below),
-        TerrainDistance(p + float3(0, e, 0), below) - TerrainDistance(p - float3(0, e, 0), below),
-        TerrainDistance(p + float3(0, 0, e), below) - TerrainDistance(p - float3(0, 0, e), below)
-    );
+    float hL = TerrainHeight(p.xz - float2(e, 0));
+    float hR = TerrainHeight(p.xz + float2(e, 0));
+    float hD = TerrainHeight(p.xz - float2(0, e));
+    float hU = TerrainHeight(p.xz + float2(0, e));
 
-    n = normalize(n);
+    float dhdx = (hR - hL) / (2.0f * e);
+    float dhdz = (hU - hD) / (2.0f * e);
+
+    float3 n = normalize(float3(-dhdx, 1.0f, -dhdz));
 
     return below ? -n : n;
 }
@@ -344,6 +346,7 @@ void Main (uint3 id : SV_DispatchThreadID)
     float d = Raymarch(cameraPos, rayDirection, belowTerrain, elevation);
     float3 col = 0;
     float shadow;
+    PBRMaterial mat;
 
     if (d < _MaxDistance)
     {
@@ -352,7 +355,6 @@ void Main (uint3 id : SV_DispatchThreadID)
         float3 n = GetNormal(p, belowTerrain);
         float4 biomeValue = BiomeColor(elevation);
         
-        PBRMaterial mat;
         mat.baseColor = biomeValue.rgb;
         mat.roughness = biomeValue.a;
         mat.metallic = _Metallic;
@@ -402,5 +404,5 @@ void Main (uint3 id : SV_DispatchThreadID)
     }
    
     //_Result[id.xy] = float4(shadow.xxx, 1.0);
-    _Result[id.xy] = float4(col.rgb, 1.0);
+    _Result[id.xy] = float4(col, 1.0);
 }

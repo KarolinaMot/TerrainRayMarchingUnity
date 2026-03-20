@@ -209,8 +209,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.003768663, y: 0.9960157, z: -0.051890783, w: -0.072428666}
-  m_LocalPosition: {x: 533.43085, y: 101.83761, z: 718.19965}
+  m_LocalRotation: {x: 0.003567697, y: 0.9959492, z: -0.077214904, w: 0.04593806}
+  m_LocalPosition: {x: 5050.7485, y: 768.25714, z: 8330.229}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -272,8 +272,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7817cd5ecbb5e284189d7664215d815b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  maxSteps: 256
-  maxDistance: 1024
+  maxSteps: 10000
+  maxDistance: 10000
   distanceForHit: 0.27
   grassColor: {r: 0.18349235, g: 0.4339623, b: 0.104396574, a: 0}
   waterColor: {r: 0.15744035, g: 0.2886758, b: 0.5471698, a: 0}
@@ -281,13 +281,13 @@ MonoBehaviour:
   sandColor: {r: 0.8207547, g: 0.6697668, b: 0.5458793, a: 0}
   forestColor: {r: 0.047837317, g: 0.23584908, b: 0.094205886, a: 0}
   rockColor: {r: 0.20754719, g: 0.19482024, b: 0.19482024, a: 0}
-  grassLevel: 2.93
-  forestLevel: 9.3
-  rockLevel: 26.3
-  snowLevel: 46.7
-  oceanDepth: 0.25
-  sunAngularRadius: 3
-  shadowSteps: 165
+  grassLevel: 23.92
+  forestLevel: 97
+  rockLevel: 299.8
+  snowLevel: 745.9
+  oceanDepth: 9.28
+  sunAngularRadius: 1.1
+  shadowSteps: 2000
   shadowSamples: 1
   useBlueNoise: 0
   pathTracedShadows: 1
@@ -305,7 +305,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   m_LookSpeedController: 120
   m_LookSpeedMouse: 10
-  m_MoveSpeed: 30
+  m_MoveSpeed: 90
   m_MoveSpeedIncrement: 2.5
   m_Turbo: 10
 --- !u!114 &330585550
@@ -320,17 +320,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e86a9b3f6dc4ef04aaa99ddb7f37be42, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  verticesPerChunk: 1000
-  chunkSize: 1024
-  octaves: 2
-  persistence: 0.01
-  lacunarity: 7.43
-  noiseCellScaling: 0.04
-  heightMultiplier: 7.13
-  lows: 1.78
-  mountainRangeHeight: 3.19
-  mountainRangeContrast: 7.73
-  mountainRangeDensity: 0.005
+  verticesPerChunk: 4090
+  chunkSize: 20000
+  octaves: 8
+  persistence: 0.07
+  lacunarity: 7.4
+  noiseCellScaling: 0.001
+  heightMultiplier: 5.63
+  lows: 2.57
+  mountainRangeHeight: 44.5
+  mountainRangeContrast: 3.97
+  mountainRangeDensity: 0.00012
   heightmap: {fileID: 0}
 --- !u!114 &330585551
 MonoBehaviour:

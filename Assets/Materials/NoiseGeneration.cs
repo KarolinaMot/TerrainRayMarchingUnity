@@ -39,7 +39,7 @@ public class NoiseGeneration : MonoBehaviour
         heightmap.graphicsFormat = GraphicsFormat.R32_SFloat;
         heightmap.enableRandomWrite = true;
         heightmap.wrapMode = TextureWrapMode.Clamp;
-        heightmap.filterMode = FilterMode.Bilinear;
+        heightmap.filterMode = FilterMode.Trilinear;
         heightmap.Create();
 
         RunCompute();
