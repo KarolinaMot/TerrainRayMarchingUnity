@@ -2,6 +2,7 @@
 #pragma kernel Main
 
 #include "../Includes/Noise.hlsl"
+#include "../Includes/BlueNoise.hlsl"
 #include "../Includes/PBR.hlsl"
 #define AMBIENT_INTENSITY 0.2f
 // Create a RenderTexture with enableRandomWrite flag and set it
@@ -32,16 +33,22 @@ float _SnowLevel;
 float _OceanDepth;
 
 float _Metallic;
-float _ShadowSoftness;
+float _SunAngularRadius;
 float _ShadowSteps;
+uint _ShadowSamples;
+uint _UseBlueNoise;
+uint _UsePathtracedShadows;
 
 //Other
 float4 _SunDirectionIntensity;
 float3 _SunColor;
 
+SamplerState sampler_TemporalShadowPrev;
 SamplerState sampler_HeightMap;
 RWTexture2D<float4> _Result;
 Texture2D<float4> _Source;
+RWTexture2D<float2> _TemporalShadow;
+Texture2D<float2> _TemporalShadowPrev;
 
 float4x4 _CameraToWorld;
 float4x4 _CameraInverseProjection;
@@ -108,7 +115,7 @@ float Shadow(float3 ro, float3 rd, float mint, float maxt)
     float t = mint;
     float res = 1.0f;
 
-    const int steps = _ShadowSteps;
+    int steps = _ShadowSteps;
     const float thickness = -5.f;
 
     for (int i = 0; i < steps && t < maxt; i++)
@@ -120,13 +127,49 @@ float Shadow(float3 ro, float3 rd, float mint, float maxt)
         if (h < thickness)
             return AMBIENT_INTENSITY;
 
-        res = min(res, _ShadowSoftness * (h - thickness) / max(t, 1e-3f));
+        res = min(res, _SunAngularRadius * (h - thickness) / max(t, 1e-3f));
         float stepSize = clamp(t * 0.2f, 0.05f, 2.f);
         t += stepSize;
     }
 
     return saturate(res + AMBIENT_INTENSITY);
     //return 1.f;
+}
+
+uint Hash(uint x)
+{
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return x;
+}
+
+float Rand(inout uint seed)
+{
+    seed = Hash(seed);
+    // Take lower 24 bits and normalize
+    return (seed & 0x00FFFFFFu) / 16777216.0f; // 2^24
+}
+
+void CreateCoordinateSystem(const float3 N, out float3 Nt, out float3 Nb)
+{
+    if (abs(N.x) > abs(N.y))
+        Nt = float3(N.z, 0, -N.x) / sqrt(N.x * N.x + N.z * N.z);
+    else
+        Nt = float3(0, -N.z, N.y) / sqrt(N.y * N.y + N.z * N.z);
+    Nb = cross(N, Nt);
+}
+
+float3 CosineSampleHemisphere(float u1, float u2)
+{
+    float r = sqrt(u1);
+    float phi = 2.0 * sPi * u2;
+    float x = r * cos(phi);
+    float y = r * sin(phi);
+    float z = sqrt(1.0 - u1);
+    return float3(x, y, z);
 }
 
 float Raymarch(float3 rOrigin, float3 rDirection, bool below, out float terrainHeightAtHit)
@@ -175,6 +218,80 @@ float Raymarch(float3 rOrigin, float3 rDirection, bool below, out float terrainH
     return _MaxDistance; // no hit
 }
 
+void MakeOrthonormalBasis(float3 n, out float3 t, out float3 b)
+{
+    float3 up = (abs(n.z) < 0.999f) ? float3(0, 0, 1) : float3(0, 1, 0);
+    t = normalize(cross(up, n));
+    b = cross(n, t);
+}
+
+float3 SampleConeDirection(float3 axis, float cosMax, float2 u)
+{
+    float cosTheta = lerp(cosMax, 1.0f, u.x);
+    float sinTheta = sqrt(max(0.0f, 1.0f - cosTheta * cosTheta));
+    float phi = 2.0f * sPi * u.y;
+
+    float3 t, b;
+    MakeOrthonormalBasis(axis, t, b);
+
+    return normalize(t * (cos(phi) * sinTheta) + b * (sin(phi) * sinTheta) + axis * cosTheta);
+}
+
+
+float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims, uint2 id, float2 uv, uint seedBase)
+{
+    int sampleCount = _ShadowSamples;
+    float visibility = 0.0f;
+
+    rd = normalize(rd);
+
+    float3 rayStart = ro + normal * 0.05f;
+    float sunHeight = saturate(rd.y);
+    float cosMax = cos(max(radians(_SunAngularRadius), 1e-6f));
+    float tmax = 1e30f; // "infinite"
+    float2 u;
+
+    for (int j = 0; j < sampleCount; j++)
+    {
+        if (_UseBlueNoise)
+        {
+            u.x = BlueNoise::Sample(uv, dims, _FrameIndex);
+            u.y = BlueNoise::Sample(uv, dims, _FrameIndex + 32); // + float2(47.0 / dims.x, 367.0 / dims.y)
+        }
+        else
+        {
+            
+            uint seed = seedBase + j* 9781u;
+            u = float2(Rand(seed), Rand(seed));
+        }
+        
+        float3 lightDir = SampleConeDirection(rd, cosMax, u);
+
+        float t = mint;
+        bool blocked = false;
+
+        for (int i = 0; i < _ShadowSteps && t < tmax; i++)
+        {
+            float3 p = rayStart + lightDir * t;
+            float terrainY = TerrainHeight(p.xz);
+
+            if (p.y <= terrainY + 0.05f)
+            {
+                blocked = true;
+                break;
+            }
+
+            float stepSize = clamp(t * 0.2f, 0.05f, 2.0f);
+            t += stepSize;
+        }
+
+        visibility += blocked ? AMBIENT_INTENSITY : 1.0f;
+    }
+
+    return visibility;
+    //return u.x;
+}
+
 float3 GetNormal(float3 p, bool below)
 {
     float e = 0.01;
@@ -193,13 +310,13 @@ float3 GetNormal(float3 p, bool below)
 [numthreads(16,16,1)]
 void Main (uint3 id : SV_DispatchThreadID)
 {
-    uint width, height;
-    _Result.GetDimensions(width, height);
+    uint2 dims;
+    _Result.GetDimensions(dims.x, dims.y);
 
-    if (id.x >= width || id.y >= height)
+    if (id.x >= dims.x || id.y >= dims.y)
         return;
 
-    float2 uv = (float2(id.xy) + 0.5) / float2(width, height);
+    float2 uv = (float2(id.xy) + 0.5) / float2(dims.x, dims.y);
 
     // 0..1 -> -1..1
     float2 ndc = uv * 2.0 - 1.0;
@@ -224,9 +341,10 @@ void Main (uint3 id : SV_DispatchThreadID)
     
     bool belowTerrain = IsBelowTerrain(cameraPos);
     float elevation = 0;
-    
     float d = Raymarch(cameraPos, rayDirection, belowTerrain, elevation);
     float3 col = 0;
+    float shadow;
+
     if (d < _MaxDistance)
     {
 
@@ -252,17 +370,37 @@ void Main (uint3 id : SV_DispatchThreadID)
         float3 ambientColor = 1.f;
         GetBRDF(mat, viewDirection, viewDirection, ambientColor, AMBIENT_INTENSITY, 1.f, diffuse, specular);
         
-        float shadow = Shadow(p + n * 0.02f, sunDir, 0.01f, 2000.f);
+        if (_UsePathtracedShadows)
+        {
+            shadow = MarchedShadows(p + n * 0.02f, sunDir, 0.01f, n, dims, id.xy, uv,
+              Hash(id.x + id.y * dims.x) + _FrameIndex);
+            
+            float2 tempShadows = _TemporalShadowPrev.Load(id);
+            float oldShadows = tempShadows.r;
+            float oldShadowSampleNum = tempShadows.g;
+            float newShadows = oldShadows + shadow;
+            float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
+            float shadowRes = newShadows / max(1.f, newShadowSampleNum);
+            shadow = shadowRes;
+            
+            _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
+        }
+        else
+        {
+            shadow = Shadow(p + n * 0.02f, sunDir, 0.01f, _MaxDistance);
+        }
+        
         col.rgb = diffuse + specular;
         col.rgb *= shadow;
         //col = mat.baseColor;
     }
     else
     {
-        uint flippedY = height - 1 - id.y;
+        uint flippedY = dims.y - 1 - id.y;
         float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
         col.rgb = rtColor;
     }
-    
-    _Result[id.xy] = float4(col, 1.0);
+   
+    //_Result[id.xy] = float4(shadow.xxx, 1.0);
+    _Result[id.xy] = float4(col.rgb, 1.0);
 }

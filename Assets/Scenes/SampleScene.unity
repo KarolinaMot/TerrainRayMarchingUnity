@@ -131,6 +131,7 @@ GameObject:
   - component: {fileID: 330585545}
   - component: {fileID: 330585544}
   - component: {fileID: 330585547}
+  - component: {fileID: 330585551}
   - component: {fileID: 330585549}
   - component: {fileID: 330585550}
   - component: {fileID: 330585548}
@@ -208,13 +209,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.15851535, y: 0.7506563, z: -0.61112803, w: 0.19470641}
-  m_LocalPosition: {x: 239, y: 388, z: 329}
+  m_LocalRotation: {x: -0.003768663, y: 0.9960157, z: -0.051890783, w: -0.072428666}
+  m_LocalPosition: {x: 533.43085, y: 101.83761, z: 718.19965}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 32.056, y: 157.519, z: 0}
 --- !u!114 &330585547
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -285,8 +286,11 @@ MonoBehaviour:
   rockLevel: 26.3
   snowLevel: 46.7
   oceanDepth: 0.25
-  shadowSoftness: 6
+  sunAngularRadius: 3
   shadowSteps: 165
+  shadowSamples: 1
+  useBlueNoise: 0
+  pathTracedShadows: 1
 --- !u!114 &330585549
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -328,6 +332,19 @@ MonoBehaviour:
   mountainRangeContrast: 7.73
   mountainRangeDensity: 0.005
   heightmap: {fileID: 0}
+--- !u!114 &330585551
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 330585543}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 27d5d53505364234cb7d4adb0dbd7bea, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  blueNoise: {fileID: 2800000, guid: 0aaf58cc035d7c74999ddc68224f9e70, type: 3}
 --- !u!1 &410087039
 GameObject:
   m_ObjectHideFlags: 0
@@ -357,7 +374,7 @@ Light:
   serializedVersion: 11
   m_Type: 1
   m_Color: {r: 1, g: 1, b: 1, a: 1}
-  m_Intensity: 3.3
+  m_Intensity: 7
   m_Range: 10
   m_SpotAngle: 30
   m_InnerSpotAngle: 21.80208
@@ -419,13 +436,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 410087039}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.03900931, y: 0.1614694, z: -0.9391843, w: -0.3005642}
+  m_LocalRotation: {x: 0.1211449, y: -0, z: -0, w: 0.99263483}
   m_LocalPosition: {x: 0, y: 3, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 50, y: -30, z: 0}
+  m_LocalEulerAnglesHint: {x: 13.916, y: 0, z: 0}
 --- !u!114 &410087042
 MonoBehaviour:
   m_ObjectHideFlags: 0

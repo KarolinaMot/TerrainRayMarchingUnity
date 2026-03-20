@@ -1,5 +1,6 @@
-using Unity.Mathematics;
+﻿using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.XR;
 using static Unity.VisualScripting.Member;
@@ -34,9 +35,20 @@ public class SdfRenderer : MonoBehaviour
     [Space(10)]
 
     [Header("Terrain shading")]
-    public float shadowSoftness = 1;
+    public float sunAngularRadius = 3;
     public float shadowSteps = 1024;
+    public int shadowSamples = 16;
+    public bool useBlueNoise = true;
+    public bool pathTracedShadows = true;
 
+    private RenderTexture[] temporalShadow = new RenderTexture[2];
+    private Vector3 prevCameraPos = Vector3.zero;
+    private Quaternion prevCameraRot = Quaternion.identity;
+    float prevShadowSoftness;
+    Vector3 prevSunDirection;
+    int prevShadowSamples;
+    bool prevUseBlueNoise;
+    bool prevUsePathtraced;
 
     private void Start()
     {
@@ -45,6 +57,16 @@ public class SdfRenderer : MonoBehaviour
         camera = GetComponent<Camera>();
         noiseGen = GetComponent<NoiseGeneration>();
         sun = RenderSettings.sun;
+
+        for (int i = 0; i < 2; i++)
+        {
+            temporalShadow[i] = new RenderTexture(camera.pixelWidth, camera.pixelHeight, 0);
+            temporalShadow[i].graphicsFormat = GraphicsFormat.R32G32_SFloat;
+            temporalShadow[i].enableRandomWrite = true;
+            temporalShadow[i].wrapMode = TextureWrapMode.Clamp;
+            temporalShadow[i].filterMode = FilterMode.Bilinear;
+            temporalShadow[i].Create();
+        }
     }
     private void Update()
     {
@@ -114,15 +136,58 @@ public class SdfRenderer : MonoBehaviour
         camera.AddCommandBuffer(CameraEvent.BeforeImageEffects, cmd);
     }
 
+    private void ClearTemporal(CommandBuffer cmd)
+    {
+        for (int i = 0; i < 2; i++)
+        {
+            cmd.SetRenderTarget(temporalShadow[i]);
+            cmd.ClearRenderTarget(false, true, Color.clear); // RGFloat → (0,0)
+        }
+    }
+
+    bool CameraMoved()
+    {
+        bool moved = camera.transform.position != prevCameraPos ||
+                     camera.transform.rotation != prevCameraRot;
+
+        prevCameraPos = camera.transform.position;
+        prevCameraRot = camera.transform.rotation;
+
+        return moved;
+    }
+
+    bool SettingsChanged()
+    {
+        bool changed =
+            prevShadowSoftness != sunAngularRadius ||
+            prevShadowSamples != shadowSamples ||
+            prevUseBlueNoise != useBlueNoise ||
+            prevSunDirection != sun.transform.forward ||
+            prevUsePathtraced != pathTracedShadows;
+
+        prevShadowSoftness = sunAngularRadius;
+        prevShadowSamples = shadowSamples;
+        prevUseBlueNoise = useBlueNoise;
+        prevUsePathtraced = pathTracedShadows;
+        prevSunDirection = sun.transform.forward;
+
+        return changed;
+    }
+
     private void TerrainParameters(int kernel, CommandBuffer cmd)
     {
+        if(CameraMoved() || SettingsChanged())
+        {
+            ClearTemporal(cmd);
+        }
+
         cmd.SetComputeIntParam(marchCS, "_MaxSteps", maxSteps);
         cmd.SetComputeIntParam(marchCS, "_MaxDistance", maxDistance);
         cmd.SetComputeFloatParam(marchCS, "_DistanceForHit", distanceForHit);
         cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMap", noiseGen.heightmap);
 
         Vector4 color = new Vector4(grassColor.r, grassColor.g, grassColor.b, 0.8f);
-        Vector4 waterColorRoughness = new Vector4(waterColor.r, waterColor.g, waterColor.b, 0.25f);
+        Vector4 waterColorRoughness = new Vector4(waterColor.r, waterColor.g, waterColor.b, 0.1f);
         Vector4 snowColorRoughness = new Vector4(snowColor.r, snowColor.g, snowColor.b, 0.5f);
         Vector4 sandColorRoughness = new Vector4(sandColor.r, sandColor.g, sandColor.b, 0.8f);
         Vector4 forestColorRoughness = new Vector4(forestColor.r, forestColor.g, forestColor.b, 0.8f);
@@ -144,9 +209,15 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeFloatParam(marchCS, "_OceanDepth", oceanDepth);
         cmd.SetComputeVectorParam(marchCS, "_SunDirectionIntensity", sunDirIntensity);
         cmd.SetComputeVectorParam(marchCS, "_SunColor", sunColor);
-        cmd.SetComputeFloatParam(marchCS, "_ShadowSoftness", shadowSoftness);
+        cmd.SetComputeFloatParam(marchCS, "_ShadowSoftness", sun.cookieSize);
         cmd.SetComputeFloatParam(marchCS, "_ChunkSize", noiseGen.chunkSize);
         cmd.SetComputeVectorParam(marchCS, "_ChunkCoord", new Vector2(0f,0f));
         cmd.SetComputeFloatParam(marchCS, "_ShadowSteps", shadowSteps);
+        cmd.SetComputeIntParam(marchCS, "_ShadowSamples", (int)shadowSamples);
+        cmd.SetComputeIntParam(marchCS, "_UseBlueNoise", useBlueNoise ? 1 : 0);
+        cmd.SetComputeIntParam(marchCS, "_UsePathtracedShadows", pathTracedShadows ? 1 : 0);
+        cmd.SetComputeTextureParam(marchCS, kernel, "_TemporalShadow", temporalShadow[Time.frameCount % 2]);
+        cmd.SetComputeTextureParam(marchCS, kernel, "_TemporalShadowPrev", temporalShadow[(Time.frameCount + 1) % 2]);
+        cmd.SetComputeTextureParam(marchCS, kernel, "_BlueNoise", GetComponent<ShaderInputs>().blueNoise);
     }
 }
