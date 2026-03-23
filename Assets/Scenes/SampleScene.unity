@@ -320,7 +320,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e86a9b3f6dc4ef04aaa99ddb7f37be42, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  verticesPerChunk: 4090
+  verticesPerChunk: 4096
   chunkSize: 20000
   octaves: 8
   persistence: 0.07

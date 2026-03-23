@@ -1,10 +1,12 @@
+﻿using System;
+using System.Drawing;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 
 public class NoiseGeneration : MonoBehaviour
 {
-    public int verticesPerChunk = 129;
+    public int verticesPerChunk = 128;
     public float chunkSize = 128;
     private ComputeShader noiseCS;
     private Camera camera;
@@ -36,10 +38,13 @@ public class NoiseGeneration : MonoBehaviour
         }
 
         heightmap = new RenderTexture(verticesPerChunk, verticesPerChunk, 0);
+        heightmap.useMipMap = true;
+        heightmap.autoGenerateMips = false;
         heightmap.graphicsFormat = GraphicsFormat.R32_SFloat;
         heightmap.enableRandomWrite = true;
-        heightmap.wrapMode = TextureWrapMode.Clamp;
+        heightmap.filterMode = FilterMode.Point;
         heightmap.filterMode = FilterMode.Trilinear;
+
         heightmap.Create();
 
         RunCompute();
@@ -47,7 +52,7 @@ public class NoiseGeneration : MonoBehaviour
 
     void Update()
     {
-
+        RunCompute();
     }
 
     // Update is called once per frame
@@ -55,6 +60,7 @@ public class NoiseGeneration : MonoBehaviour
     void RunCompute()
     {
         int kernel = noiseCS.FindKernel("Main");
+        int mipKernel = noiseCS.FindKernel("ReduceMaxMip");
 
         noiseCS.SetTexture(kernel, "_HeightMap", heightmap);
 
@@ -74,5 +80,29 @@ public class NoiseGeneration : MonoBehaviour
 
         int groups = Mathf.CeilToInt(verticesPerChunk / 16.0f);
         noiseCS.Dispatch(kernel, groups, groups, 1);
+
+        int srcWidth = heightmap.width;
+        int srcHeight = heightmap.height;
+        int mipCount = heightmap.mipmapCount;
+
+        for (int srcMip = 0; srcMip < mipCount - 1; srcMip++)
+        {
+            int dstWidth = Mathf.Max(1, srcWidth / 2);
+            int dstHeight = Mathf.Max(1, srcHeight / 2);
+
+            noiseCS.SetInt("_SrcMipSizeX", srcWidth);
+            noiseCS.SetInt("_SrcMipSizeY", srcHeight);
+
+            noiseCS.SetTexture(mipKernel, "_SrcTex", heightmap, srcMip);
+            noiseCS.SetTexture(mipKernel, "_DstTex", heightmap, srcMip + 1);
+
+            int groupsX = Mathf.CeilToInt(dstWidth / 8.0f);
+            int groupsY = Mathf.CeilToInt(dstHeight / 8.0f);
+
+            noiseCS.Dispatch(mipKernel, groupsX, groupsY, 1);
+
+            srcWidth = dstWidth;
+            srcHeight = dstHeight;
+        }
     }
 }

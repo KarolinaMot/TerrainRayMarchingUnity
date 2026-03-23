@@ -4,7 +4,7 @@
 #include "../Includes/Noise.hlsl"
 #include "../Includes/BlueNoise.hlsl"
 #include "../Includes/PBR.hlsl"
-#define AMBIENT_INTENSITY 0.2f
+#define AMBIENT_INTENSITY 0.4f
 // Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
 
@@ -311,7 +311,7 @@ float3 GetNormal(float3 p, bool below)
 
 [numthreads(16,16,1)]
 void Main (uint3 id : SV_DispatchThreadID)
-{
+{   
     uint2 dims;
     _Result.GetDimensions(dims.x, dims.y);
 
@@ -319,90 +319,93 @@ void Main (uint3 id : SV_DispatchThreadID)
         return;
 
     float2 uv = (float2(id.xy) + 0.5) / float2(dims.x, dims.y);
-
-    // 0..1 -> -1..1
-    float2 ndc = uv * 2.0 - 1.0;
-
-    // Flip Y if needed
-    ndc.y = -ndc.y;
-
-    // Point on the far plane in clip space
-    float4 clipPos = float4(ndc, 1.0, 1.0);
-
-    // Back to view space
-    float4 viewPos = mul(_CameraInverseProjection, clipPos);
-    viewPos /= viewPos.w;
-
-    // Direction in view space
-    float3 rayDirView = normalize(viewPos.xyz);
-
-    // Transform direction to world space
-    float3 rayDirection = normalize(mul((float3x3) _CameraToWorld, rayDirView));
-
-    float3 cameraPos = _WorldSpaceCameraPos;
     
-    bool belowTerrain = IsBelowTerrain(cameraPos);
-    float elevation = 0;
-    float d = Raymarch(cameraPos, rayDirection, belowTerrain, elevation);
-    float3 col = 0;
-    float shadow;
-    PBRMaterial mat;
+    float value = _HeightMap.SampleLevel(sampler_HeightMap, uv, 1);
 
-    if (d < _MaxDistance)
-    {
+    //// 0..1 -> -1..1
+    //float2 ndc = uv * 2.0 - 1.0;
 
-        float3 p = cameraPos + rayDirection * d;
-        float3 n = GetNormal(p, belowTerrain);
-        float4 biomeValue = BiomeColor(elevation);
+    //// Flip Y if needed
+    //ndc.y = -ndc.y;
+
+    //// Point on the far plane in clip space
+    //float4 clipPos = float4(ndc, 1.0, 1.0);
+
+    //// Back to view space
+    //float4 viewPos = mul(_CameraInverseProjection, clipPos);
+    //viewPos /= viewPos.w;
+
+    //// Direction in view space
+    //float3 rayDirView = normalize(viewPos.xyz);
+
+    //// Transform direction to world space
+    //float3 rayDirection = normalize(mul((float3x3) _CameraToWorld, rayDirView));
+
+    //float3 cameraPos = _WorldSpaceCameraPos;
+    
+    //bool belowTerrain = IsBelowTerrain(cameraPos);
+    //float elevation = 0;
+    //float d = Raymarch(cameraPos, rayDirection, belowTerrain, elevation);
+    //float3 col = 0;
+    //float shadow;
+    //PBRMaterial mat;
+
+    //if (d < _MaxDistance)
+    //{
+
+    //    float3 p = cameraPos + rayDirection * d;
+    //    float3 n = GetNormal(p, belowTerrain);
+    //    float4 biomeValue = BiomeColor(elevation);
         
-        mat.baseColor = biomeValue.rgb;
-        mat.roughness = biomeValue.a;
-        mat.metallic = _Metallic;
-        mat.normal = n;
-        mat.F0 = float3(0.02, 0.02, 0.02);
-        mat.F0 = lerp(mat.F0, mat.baseColor.rgb, mat.metallic);
-        mat.diffuse = lerp(mat.baseColor.rgb, float3(0.0, 0.0, 0.0), mat.metallic);
-        float3 viewDirection = normalize(cameraPos - p);
-        float3 sunDir = -normalize(_SunDirectionIntensity.xyz);
+    //    mat.baseColor = biomeValue.rgb;
+    //    mat.roughness = biomeValue.a;
+    //    mat.metallic = _Metallic;
+    //    mat.normal = n;
+    //    mat.F0 = float3(0.02, 0.02, 0.02);
+    //    mat.F0 = lerp(mat.F0, mat.baseColor.rgb, mat.metallic);
+    //    mat.diffuse = lerp(mat.baseColor.rgb, float3(0.0, 0.0, 0.0), mat.metallic);
+    //    float3 viewDirection = normalize(cameraPos - p);
+    //    float3 sunDir = -normalize(_SunDirectionIntensity.xyz);
         
-        float3 diffuse = 0.f;
-        float3 specular = 0.f;
-        GetBRDF(mat, viewDirection, sunDir, _SunColor, _SunDirectionIntensity.w, 1.f, diffuse, specular);
+    //    float3 diffuse = 0.f;
+    //    float3 specular = 0.f;
+    //    GetBRDF(mat, viewDirection, sunDir, _SunColor, _SunDirectionIntensity.w, 1.f, diffuse, specular);
         
-        float3 ambientColor = 1.f;
-        GetBRDF(mat, viewDirection, viewDirection, ambientColor, AMBIENT_INTENSITY, 1.f, diffuse, specular);
+    //    float3 ambientColor = 1.f;
+    //    GetBRDF(mat, viewDirection, viewDirection, ambientColor, AMBIENT_INTENSITY, 1.f, diffuse, specular);
         
-        if (_UsePathtracedShadows)
-        {
-            shadow = MarchedShadows(p + n * 0.02f, sunDir, 0.01f, n, dims, id.xy, uv,
-              Hash(id.x + id.y * dims.x) + _FrameIndex);
+    //    if (_UsePathtracedShadows)
+    //    {
+    //        shadow = MarchedShadows(p + n * 0.02f, sunDir, 0.01f, n, dims, id.xy, uv,
+    //          Hash(id.x + id.y * dims.x) + _FrameIndex);
             
-            float2 tempShadows = _TemporalShadowPrev.Load(id);
-            float oldShadows = tempShadows.r;
-            float oldShadowSampleNum = tempShadows.g;
-            float newShadows = oldShadows + shadow;
-            float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
-            float shadowRes = newShadows / max(1.f, newShadowSampleNum);
-            shadow = shadowRes;
+    //        float2 tempShadows = _TemporalShadowPrev.Load(id);
+    //        float oldShadows = tempShadows.r;
+    //        float oldShadowSampleNum = tempShadows.g;
+    //        float newShadows = oldShadows + shadow;
+    //        float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
+    //        float shadowRes = newShadows / max(1.f, newShadowSampleNum);
+    //        shadow = shadowRes;
             
-            _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
-        }
-        else
-        {
-            shadow = Shadow(p + n * 0.02f, sunDir, 0.01f, _MaxDistance);
-        }
+    //        _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
+    //    }
+    //    else
+    //    {
+    //        shadow = Shadow(p + n * 0.02f, sunDir, 0.01f, _MaxDistance);
+    //    }
         
-        col.rgb = diffuse + specular;
-        col.rgb *= shadow;
-        //col = mat.baseColor;
-    }
-    else
-    {
-        uint flippedY = dims.y - 1 - id.y;
-        float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
-        col.rgb = rtColor;
-    }
+    //    col.rgb = diffuse + specular;
+    //    col.rgb *= shadow;
+    //    //col = mat.baseColor;
+    //}
+    //else
+    //{
+    //    uint flippedY = dims.y - 1 - id.y;
+    //    float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
+    //    col.rgb = rtColor;
+    //}
    
-    //_Result[id.xy] = float4(shadow.xxx, 1.0);
-    _Result[id.xy] = float4(col, 1.0);
-}
+    ////_Result[id.xy] = float4(shadow.xxx, 1.0);
+    //_Result[id.xy] = float4(col, 1.0);
+    _Result[id.xy] = float4(value.xxx, 1.0);
+}    

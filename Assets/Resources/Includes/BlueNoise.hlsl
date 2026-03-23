@@ -15,6 +15,8 @@ namespace BlueNoise
     
         return _BlueNoise64.SampleLevel(sampler_BlueNoise64, float3(uv, slice), 0.0).r;
     }
+    
+    
 }
 
 #endif // BLUE_NOISE_INCLUDED
