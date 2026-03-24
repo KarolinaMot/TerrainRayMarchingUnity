@@ -172,52 +172,6 @@ float3 CosineSampleHemisphere(float u1, float u2)
     return float3(x, y, z);
 }
 
-float Raymarch(float3 rOrigin, float3 rDirection, bool below, out float terrainHeightAtHit)
-{
-    float t = 0.0;
-    terrainHeightAtHit = 0.0;
-
-    float prevDist = 0.0;
-    bool hasPrev = false;
-
-    for (int i = 0; i < _MaxSteps; i++)
-    {
-        float3 p = rOrigin + rDirection * t;
-
-        if (!IsInsideChunk(p.xz))
-            return _MaxDistance;
-
-        float h = TerrainHeight(p.xz);
-        float dist = p.y - h;
-
-        if (below)
-            dist = -dist;
-
-        if (abs(dist) < _DistanceForHit)
-        {
-            terrainHeightAtHit = h;
-            return t;
-        }
-
-        if (hasPrev && prevDist > 0.0f && dist < 0.0f)
-        {
-            terrainHeightAtHit = h;
-            return t;
-        }
-
-        prevDist = dist;
-        hasPrev = true;
-
-        float stepSize = clamp(abs(dist) * 0.25f, 0.02f, 20.0f);
-        t += stepSize;
-
-        if (t > _MaxDistance)
-            break;
-    }
-
-    return _MaxDistance;
-}
-
 void MakeOrthonormalBasis(float3 n, out float3 t, out float3 b)
 {
     float3 up = (abs(n.z) < 0.999f) ? float3(0, 0, 1) : float3(0, 1, 0);
@@ -236,7 +190,6 @@ float3 SampleConeDirection(float3 axis, float cosMax, float2 u)
 
     return normalize(t * (cos(phi) * sinTheta) + b * (sin(phi) * sinTheta) + axis * cosTheta);
 }
-
 
 float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims, uint2 id, float2 uv, uint seedBase)
 {
@@ -292,6 +245,148 @@ float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims
     //return u.x;
 }
 
+int2 GetMipSize(int mip, uint2 heightmapDimensions)
+{
+    return max(int2(1, 1), heightmapDimensions.x >> mip);
+}
+
+bool IntersectTerrainXZBounds(float3 ro, float3 rd, out float tEnter, out float tExit)
+{
+   // Compute world-space bounds of the terrain chunk
+    float2 chunkMin = _ChunkCoord * _ChunkSize; // bottom-left corner (XZ)
+    float2 chunkMax = chunkMin + _ChunkSize; // top-right corner (XZ)
+
+    // Precompute inverse ray direction (used to replace division with multiplication)
+    float2 invDir = 1.0 / rd.xz;
+
+    // Compute intersection distances (t) with the two X planes and two Z planes
+    // These represent where the ray hits the min and max boundaries
+    float2 t0 = (chunkMin - ro.xz) * invDir; // intersection with min planes
+    float2 t1 = (chunkMax - ro.xz) * invDir; // intersection with max planes
+
+    // For each axis, determine which intersection is entry and which is exit
+    // (depends on ray direction sign)
+    float2 tmin2 = min(t0, t1); // entry distances per axis
+    float2 tmax2 = max(t0, t1); // exit distances per axis
+
+    // Combine X and Z slabs:
+    // - we enter the box at the later of the two entry points
+    // - we exit the box at the earlier of the two exit points
+    tEnter = max(tmin2.x, tmin2.y); // entry into both X and Z
+    tExit = min(tmax2.x, tmax2.y); // exit from either X or Z
+
+    // Valid intersection if:
+    // 1. exit happens after entry (overlapping interval)
+    // 2. intersection is in front of the ray (t >= 0)
+    return tExit >= max(tEnter, 0.0);
+}
+
+int2 WorldToMipTexel(float2 xz, int mip, uint2 heightmapDimensions)
+{
+    float2 uv = xz  / _ChunkSize;
+    int2 mipSize = GetMipSize(mip, heightmapDimensions);
+    int2 texel = (int2) floor(uv * mipSize);
+    return texel; // ❗ no clamp
+}
+
+void GetMipCellBounds(int2 cell, int mip, out float2 cellMinXZ, out float2 cellMaxXZ, uint2 heightmapDimensions)
+{
+    int2 mipSize = GetMipSize(mip, heightmapDimensions);
+    float2 chunkOffset = _ChunkCoord * _ChunkSize;
+
+    float2 uvMin = (float2) cell / mipSize;
+    float2 uvMax = (float2) (cell + 1) / mipSize;
+
+    cellMinXZ = chunkOffset + uvMin * _ChunkSize;
+    cellMaxXZ = chunkOffset + uvMax * _ChunkSize;
+}
+
+float ComputeCellExitT(float3 ro, float3 rd, float currentT, float2 cellMinXZ, float2 cellMaxXZ)
+{
+    float tx = 1e30;
+    float tz = 1e30;
+
+    if (abs(rd.x) > 1e-8)
+    {
+        float xBoundary = (rd.x > 0.0) ? cellMaxXZ.x : cellMinXZ.x;
+        tx = (xBoundary - ro.x) / rd.x;
+    }
+
+    if (abs(rd.z) > 1e-8)
+    {
+        float zBoundary = (rd.z > 0.0) ? cellMaxXZ.y : cellMinXZ.y;
+        tz = (zBoundary - ro.z) / rd.z;
+    }
+
+    float tExit = min(tx, tz);
+    return max(tExit, currentT + 1e-5);
+}
+
+float LoadMipHeight(int2 texel, int mip, uint2 dimensions)
+{
+    int2 mipSize = GetMipSize(mip, dimensions);
+    texel = clamp(texel, int2(0, 0), mipSize - 1);
+    return _HeightMap.Load(int3(texel, mip));
+}
+
+float SampleTerrainHeight(float2 xz, uint mip)
+{
+    float2 uv = xz / _ChunkSize;
+    return _HeightMap.SampleLevel(sampler_HeightMap, uv, mip);
+}
+
+bool TraverseHeightfieldMaxMip(
+    float3 ro,
+    float3 rd,
+    out float hitT,
+    out float3 hitPos,
+    out float hitHeight)
+{
+    uint3 dimensions;
+    _HeightMap.GetDimensions(0, dimensions.x, dimensions.y, dimensions.z);
+    
+    hitT = 0.0;
+    hitPos = 0.0;
+    hitHeight = 0.0;
+
+    float tEnter, tExitDomain;
+    if (!IntersectTerrainXZBounds(ro, rd, tEnter, tExitDomain))
+        return false;
+
+    //jumping to the point where the terrain begins
+    float t = max(tEnter, 0.0);
+
+    // Starting a bit below the top is often more practical than starting at the root
+    int mip = max(0,0);
+    
+    bool rayAboveHeightField = true;
+    
+    for (int i = 0; i < _MaxSteps; i++)
+    {
+        float3 p = ro + rd * t;
+        
+        uint2 mipSize = GetMipSize(mip, dimensions.xy);
+        float2 mipUV = p.xz / _ChunkSize;
+        int mipTexel = mipSize * mipUV;
+        
+        float heightAtTexel = SampleTerrainHeight(p.xz, mip);
+        float dist = p.y - heightAtTexel;
+
+        if (abs(dist) < _DistanceForHit)
+        {
+            hitHeight = heightAtTexel;
+            return true;
+        }
+
+        float stepSize = clamp(abs(dist) * 0.25f, 0.02f, 20.0f);
+        t += stepSize;
+
+        if (t > _MaxDistance)
+            break;
+    }       
+    return false;
+}
+
 float3 GetNormal(float3 p, bool below)
 {
     float e = 0.1f; // tune based on your world scale
@@ -320,92 +415,93 @@ void Main (uint3 id : SV_DispatchThreadID)
 
     float2 uv = (float2(id.xy) + 0.5) / float2(dims.x, dims.y);
     
-    float value = _HeightMap.SampleLevel(sampler_HeightMap, uv, 1);
+    float value = _HeightMap.SampleLevel(sampler_HeightMap, uv, 0);
 
-    //// 0..1 -> -1..1
-    //float2 ndc = uv * 2.0 - 1.0;
+    // 0..1 -> -1..1
+    float2 ndc = uv * 2.0 - 1.0;
 
-    //// Flip Y if needed
-    //ndc.y = -ndc.y;
+    // Flip Y if needed
+    ndc.y = -ndc.y;
 
-    //// Point on the far plane in clip space
-    //float4 clipPos = float4(ndc, 1.0, 1.0);
+    // Point on the far plane in clip space
+    float4 clipPos = float4(ndc, 1.0, 1.0);
 
-    //// Back to view space
-    //float4 viewPos = mul(_CameraInverseProjection, clipPos);
-    //viewPos /= viewPos.w;
+    // Back to view space
+    float4 viewPos = mul(_CameraInverseProjection, clipPos);
+    viewPos /= viewPos.w;
 
-    //// Direction in view space
-    //float3 rayDirView = normalize(viewPos.xyz);
+    // Direction in view space
+    float3 rayDirView = normalize(viewPos.xyz);
 
-    //// Transform direction to world space
-    //float3 rayDirection = normalize(mul((float3x3) _CameraToWorld, rayDirView));
+    // Transform direction to world space
+    float3 rayDirection = normalize(mul((float3x3) _CameraToWorld, rayDirView));
 
-    //float3 cameraPos = _WorldSpaceCameraPos;
+    float3 cameraPos = _WorldSpaceCameraPos;
     
-    //bool belowTerrain = IsBelowTerrain(cameraPos);
-    //float elevation = 0;
-    //float d = Raymarch(cameraPos, rayDirection, belowTerrain, elevation);
-    //float3 col = 0;
-    //float shadow;
-    //PBRMaterial mat;
+    bool belowTerrain = IsBelowTerrain(cameraPos);
+    float elevation = 0;
+    float3 col = 0;
+    float shadow;
+    float hitT;
+    float3 hitPos;
+    bool hit = TraverseHeightfieldMaxMip(cameraPos, rayDirection, hitT, hitPos, elevation);
+   // bool hit = Raymarch(cameraPos, rayDirection, belowTerrain, elevation, hitT);
+    
 
-    //if (d < _MaxDistance)
-    //{
-
-    //    float3 p = cameraPos + rayDirection * d;
-    //    float3 n = GetNormal(p, belowTerrain);
-    //    float4 biomeValue = BiomeColor(elevation);
+    if (hit)
+    {
+        float3 p = cameraPos + rayDirection * hitT;
+        float3 n = GetNormal(p, belowTerrain);
+        float4 biomeValue = BiomeColor(elevation);
         
-    //    mat.baseColor = biomeValue.rgb;
-    //    mat.roughness = biomeValue.a;
-    //    mat.metallic = _Metallic;
-    //    mat.normal = n;
-    //    mat.F0 = float3(0.02, 0.02, 0.02);
-    //    mat.F0 = lerp(mat.F0, mat.baseColor.rgb, mat.metallic);
-    //    mat.diffuse = lerp(mat.baseColor.rgb, float3(0.0, 0.0, 0.0), mat.metallic);
-    //    float3 viewDirection = normalize(cameraPos - p);
-    //    float3 sunDir = -normalize(_SunDirectionIntensity.xyz);
+        PBRMaterial mat;
+        mat.baseColor = biomeValue.rgb;
+        mat.roughness = biomeValue.a;
+        mat.metallic = _Metallic;
+        mat.normal = n;
+        mat.F0 = float3(0.02, 0.02, 0.02);
+        mat.F0 = lerp(mat.F0, mat.baseColor.rgb, mat.metallic);
+        mat.diffuse = lerp(mat.baseColor.rgb, float3(0.0, 0.0, 0.0), mat.metallic);
         
-    //    float3 diffuse = 0.f;
-    //    float3 specular = 0.f;
-    //    GetBRDF(mat, viewDirection, sunDir, _SunColor, _SunDirectionIntensity.w, 1.f, diffuse, specular);
+        float3 viewDirection = normalize(cameraPos - p);
+        float3 sunDir = -normalize(_SunDirectionIntensity.xyz);
         
-    //    float3 ambientColor = 1.f;
-    //    GetBRDF(mat, viewDirection, viewDirection, ambientColor, AMBIENT_INTENSITY, 1.f, diffuse, specular);
+        float3 diffuse = 0.f;
+        float3 specular = 0.f;
+        GetBRDF(mat, viewDirection, sunDir, _SunColor, _SunDirectionIntensity.w, 1.f, diffuse, specular);
         
-    //    if (_UsePathtracedShadows)
-    //    {
-    //        shadow = MarchedShadows(p + n * 0.02f, sunDir, 0.01f, n, dims, id.xy, uv,
-    //          Hash(id.x + id.y * dims.x) + _FrameIndex);
+        float3 ambientColor = 1.f;
+        GetBRDF(mat, viewDirection, viewDirection, ambientColor, AMBIENT_INTENSITY, 1.f, diffuse, specular);
+        
+        if (_UsePathtracedShadows)
+        {
+            shadow = MarchedShadows(p + n * 0.02f, sunDir, 0.01f, n, dims, id.xy, uv,
+              Hash(id.x + id.y * dims.x) + _FrameIndex);
             
-    //        float2 tempShadows = _TemporalShadowPrev.Load(id);
-    //        float oldShadows = tempShadows.r;
-    //        float oldShadowSampleNum = tempShadows.g;
-    //        float newShadows = oldShadows + shadow;
-    //        float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
-    //        float shadowRes = newShadows / max(1.f, newShadowSampleNum);
-    //        shadow = shadowRes;
+            float2 tempShadows = _TemporalShadowPrev.Load(id);
+            float oldShadows = tempShadows.r;
+            float oldShadowSampleNum = tempShadows.g;
+            float newShadows = oldShadows + shadow;
+            float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
+            float shadowRes = newShadows / max(1.f, newShadowSampleNum);
+            shadow = shadowRes;
             
-    //        _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
-    //    }
-    //    else
-    //    {
-    //        shadow = Shadow(p + n * 0.02f, sunDir, 0.01f, _MaxDistance);
-    //    }
+            _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
+        }
+        else
+        {
+            shadow = Shadow(p + n * 0.02f, sunDir, 0.01f, _MaxDistance);
+        }
         
-    //    col.rgb = diffuse + specular;
-    //    col.rgb *= shadow;
-    //    //col = mat.baseColor;
-    //}
-    //else
-    //{
-    //    uint flippedY = dims.y - 1 - id.y;
-    //    float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
-    //    col.rgb = rtColor;
-    //}
+        col.rgb = mat.baseColor;
+        //col.rgb *= shadow;
+    }
+    else
+    {
+        uint flippedY = dims.y - 1 - id.y;
+        float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
+        col.rgb = rtColor;
+    }
    
-    ////_Result[id.xy] = float4(shadow.xxx, 1.0);
-    //_Result[id.xy] = float4(col, 1.0);
-    _Result[id.xy] = float4(value.xxx, 1.0);
+    _Result[id.xy] = float4(col, 1.0);
 }    

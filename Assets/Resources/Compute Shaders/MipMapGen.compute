@@ -1,0 +1,57 @@
+﻿#pragma kernel ReduceMaxMip
+
+Texture2D<float> _SrcTex;
+SamplerState sampler_SrcTex;
+RWTexture2D<float> _DstTex;
+
+int _SrcMipSizeX;
+int _SrcMipSizeY;
+int _SrcMip;
+
+[numthreads(8, 8, 1)]
+void ReduceMaxMip(uint3 id : SV_DispatchThreadID)
+{
+    // Each thread computes ONE pixel in the destination mip
+	uint2 dst = id.xy;
+	uint2 dims;
+	_DstTex.GetDimensions(dims.x, dims.y);
+
+	if (id.x >= dims.x || id.y >= dims.y)
+		return;
+
+	float2 uv = (float2(id.xy) + 0.5) / float2(dims.x, dims.y);
+
+    // Destination mip is half resolution of source (minimum 1)
+	uint dstWidth = max(1, _SrcMipSizeX / 2u);
+	uint dstHeight = max(1, _SrcMipSizeY / 2u);
+
+    // Kill threads that are outside valid destination range
+	if (dst.x >= dstWidth || dst.y >= dstHeight)
+		return;
+
+    // Map this destination pixel to a 2x2 block in the source mip
+    // (each dst pixel represents a region of 4 src pixels)
+	uint2 src00 = dst * 2; // (2x,   2y)
+	uint2 src10 = src00 + uint2(1, 0); // (2x+1, 2y)
+	uint2 src01 = src00 + uint2(0, 1); // (2x,   2y+1)
+	uint2 src11 = src00 + uint2(1, 1); // (2x+1, 2y+1)
+
+    // Clamp coordinates in case of odd texture sizes (e.g. 129 → 64)
+    // Prevents reading outside the source texture
+	src10.x = min(src10.x, (uint) (_SrcMipSizeX - 1));
+	src01.y = min(src01.y, (uint) (_SrcMipSizeY - 1));
+	src11.x = min(src11.x, (uint) (_SrcMipSizeX - 1));
+	src11.y = min(src11.y, (uint) (_SrcMipSizeY - 1));
+
+    // Read the 4 height values from the finer mip
+	float h00 = _SrcTex.Load(int3(src00, _SrcMip));
+	float h10 = _SrcTex.Load(int3(src10, _SrcMip));
+	float h01 = _SrcTex.Load(int3(src01, _SrcMip));
+	float h11 = _SrcTex.Load(int3(src11, _SrcMip));
+
+    // Store the MAX height of this region in the coarser mip
+    // This makes the mip a conservative "upper bound" of terrain height
+    // → critical for safe ray traversal (never misses occluders)
+	_DstTex[dst] = max(max(h00, h10), max(h01, h11));
+   // _DstTex[dst] = _SrcTex.SampleLevel(sampler_SrcTex, uv, 0);
+}

@@ -9,6 +9,7 @@ public class NoiseGeneration : MonoBehaviour
     public int verticesPerChunk = 128;
     public float chunkSize = 128;
     private ComputeShader noiseCS;
+    private ComputeShader mipCS;
     private Camera camera;
 
     [Header("Terrain generation")]
@@ -24,6 +25,7 @@ public class NoiseGeneration : MonoBehaviour
 
     [HideInInspector]
     public RenderTexture heightmap;
+    public RenderTexture tempHightmap;
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
@@ -31,28 +33,41 @@ public class NoiseGeneration : MonoBehaviour
         camera = GetComponent<Camera>();
 
         noiseCS = Resources.Load<ComputeShader>("Compute Shaders/NoiseGeneration");
+        mipCS = Resources.Load<ComputeShader>("Compute Shaders/MipMapGen");
+        
         if (noiseCS == null)
         {
             Debug.LogError("Failed to load compute shader: Compute Shaders/NoiseGeneration");
             return;
         }
 
-        heightmap = new RenderTexture(verticesPerChunk, verticesPerChunk, 0);
-        heightmap.useMipMap = true;
-        heightmap.autoGenerateMips = false;
-        heightmap.graphicsFormat = GraphicsFormat.R32_SFloat;
-        heightmap.enableRandomWrite = true;
-        heightmap.filterMode = FilterMode.Point;
-        heightmap.filterMode = FilterMode.Trilinear;
-
-        heightmap.Create();
+        heightmap = CreateHeightTexture(verticesPerChunk);
+        tempHightmap = CreateHeightTexture(verticesPerChunk);
 
         RunCompute();
     }
 
     void Update()
     {
-        RunCompute();
+    }
+
+    RenderTexture CreateHeightTexture(int size)
+    {
+        var desc = new RenderTextureDescriptor(size, size, GraphicsFormat.R32_SFloat, 0);
+        desc.enableRandomWrite = true;
+        desc.useMipMap = true;
+        desc.autoGenerateMips = false;
+        desc.msaaSamples = 1;
+        desc.dimension = TextureDimension.Tex2D;
+        desc.volumeDepth = 1;
+        desc.depthBufferBits = 0;
+
+        var rt = new RenderTexture(desc);
+        rt.filterMode = FilterMode.Trilinear;
+        rt.wrapMode = TextureWrapMode.Clamp;
+        rt.Create();
+
+        return rt;
     }
 
     // Update is called once per frame
@@ -60,7 +75,7 @@ public class NoiseGeneration : MonoBehaviour
     void RunCompute()
     {
         int kernel = noiseCS.FindKernel("Main");
-        int mipKernel = noiseCS.FindKernel("ReduceMaxMip");
+        int mipKernel = mipCS.FindKernel("ReduceMaxMip");
 
         noiseCS.SetTexture(kernel, "_HeightMap", heightmap);
 
@@ -90,16 +105,19 @@ public class NoiseGeneration : MonoBehaviour
             int dstWidth = Mathf.Max(1, srcWidth / 2);
             int dstHeight = Mathf.Max(1, srcHeight / 2);
 
-            noiseCS.SetInt("_SrcMipSizeX", srcWidth);
-            noiseCS.SetInt("_SrcMipSizeY", srcHeight);
+            mipCS.SetInt("_SrcMip", srcMip);
+            mipCS.SetInt("_SrcMipSizeX", srcWidth);
+            mipCS.SetInt("_SrcMipSizeY", srcHeight);
 
-            noiseCS.SetTexture(mipKernel, "_SrcTex", heightmap, srcMip);
-            noiseCS.SetTexture(mipKernel, "_DstTex", heightmap, srcMip + 1);
+            mipCS.SetTexture(mipKernel, "_SrcTex", heightmap);
+            mipCS.SetTexture(mipKernel, "_DstTex", tempHightmap, srcMip + 1);
 
             int groupsX = Mathf.CeilToInt(dstWidth / 8.0f);
             int groupsY = Mathf.CeilToInt(dstHeight / 8.0f);
 
-            noiseCS.Dispatch(mipKernel, groupsX, groupsY, 1);
+            mipCS.Dispatch(mipKernel, groupsX, groupsY, 1);
+
+            Graphics.CopyTexture(tempHightmap, 0, srcMip + 1, heightmap, 0, srcMip + 1);
 
             srcWidth = dstWidth;
             srcHeight = dstHeight;

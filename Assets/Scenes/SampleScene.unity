@@ -272,7 +272,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7817cd5ecbb5e284189d7664215d815b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  maxSteps: 10000
+  maxSteps: 160
   maxDistance: 10000
   distanceForHit: 0.27
   grassColor: {r: 0.18349235, g: 0.4339623, b: 0.104396574, a: 0}
@@ -332,6 +332,7 @@ MonoBehaviour:
   mountainRangeContrast: 3.97
   mountainRangeDensity: 0.00012
   heightmap: {fileID: 0}
+  tempHightmap: {fileID: 0}
 --- !u!114 &330585551
 MonoBehaviour:
   m_ObjectHideFlags: 0
