@@ -245,11 +245,6 @@ float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims
     //return u.x;
 }
 
-int2 GetMipSize(int mip, uint2 heightmapDimensions)
-{
-    return max(int2(1, 1), heightmapDimensions.x >> mip);
-}
-
 bool IntersectTerrainXZBounds(float3 ro, float3 rd, out float tEnter, out float tExit)
 {
    // Compute world-space bounds of the terrain chunk
@@ -281,25 +276,25 @@ bool IntersectTerrainXZBounds(float3 ro, float3 rd, out float tEnter, out float 
     return tExit >= max(tEnter, 0.0);
 }
 
-int2 WorldToMipTexel(float2 xz, int mip, uint2 heightmapDimensions)
-{
-    float2 uv = xz  / _ChunkSize;
-    int2 mipSize = GetMipSize(mip, heightmapDimensions);
-    int2 texel = (int2) floor(uv * mipSize);
-    return texel; // ❗ no clamp
-}
+//int2 WorldToMipTexel(float2 xz, int mip, uint2 heightmapDimensions)
+//{
+//    float2 uv = xz  / _ChunkSize;
+//    int2 mipSize = GetMipSize(mip, heightmapDimensions);
+//    int2 texel = (int2) floor(uv * mipSize);
+//    return texel; // ❗ no clamp
+//}
 
-void GetMipCellBounds(int2 cell, int mip, out float2 cellMinXZ, out float2 cellMaxXZ, uint2 heightmapDimensions)
-{
-    int2 mipSize = GetMipSize(mip, heightmapDimensions);
-    float2 chunkOffset = _ChunkCoord * _ChunkSize;
+//void GetMipCellBounds(int2 cell, int mip, out float2 cellMinXZ, out float2 cellMaxXZ, uint2 heightmapDimensions)
+//{
+//    int2 mipSize = GetMipSize(mip, heightmapDimensions);
+//    float2 chunkOffset = _ChunkCoord * _ChunkSize;
 
-    float2 uvMin = (float2) cell / mipSize;
-    float2 uvMax = (float2) (cell + 1) / mipSize;
+//    float2 uvMin = (float2) cell / mipSize;
+//    float2 uvMax = (float2) (cell + 1) / mipSize;
 
-    cellMinXZ = chunkOffset + uvMin * _ChunkSize;
-    cellMaxXZ = chunkOffset + uvMax * _ChunkSize;
-}
+//    cellMinXZ = chunkOffset + uvMin * _ChunkSize;
+//    cellMaxXZ = chunkOffset + uvMax * _ChunkSize;
+//}
 
 float ComputeCellExitT(float3 ro, float3 rd, float currentT, float2 cellMinXZ, float2 cellMaxXZ)
 {
@@ -322,9 +317,8 @@ float ComputeCellExitT(float3 ro, float3 rd, float currentT, float2 cellMinXZ, f
     return max(tExit, currentT + 1e-5);
 }
 
-float LoadMipHeight(int2 texel, int mip, uint2 dimensions)
+float LoadMipHeight(int2 texel, uint2 mipSize, int mip, uint2 dimensions)
 {
-    int2 mipSize = GetMipSize(mip, dimensions);
     texel = clamp(texel, int2(0, 0), mipSize - 1);
     return _HeightMap.Load(int3(texel, mip));
 }
@@ -357,32 +351,76 @@ bool TraverseHeightfieldMaxMip(
     float t = max(tEnter, 0.0);
 
     // Starting a bit below the top is often more practical than starting at the root
-    int mip = max(0,0);
+    int mip = max(0,4);
     
     bool rayAboveHeightField = true;
     
+    float3 p = ro + rd * t;
+    float2 mipUV = p.xz / _ChunkSize;
+    uint3 mipSize;
+    _HeightMap.GetDimensions(mip, mipSize.x, mipSize.y, mipSize.z);
+    int2 mipTexel = mipSize.xy * mipUV;
+
     for (int i = 0; i < _MaxSteps; i++)
     {
-        float3 p = ro + rd * t;
+        float heightAtTexel = LoadMipHeight(mipTexel, mipSize.xy, mip, dimensions.xy);
         
-        uint2 mipSize = GetMipSize(mip, dimensions.xy);
-        float2 mipUV = p.xz / _ChunkSize;
-        int mipTexel = mipSize * mipUV;
-        
-        float heightAtTexel = SampleTerrainHeight(p.xz, mip);
-        float dist = p.y - heightAtTexel;
-
-        if (abs(dist) < _DistanceForHit)
+        //There is no intersection here, move to another texel
+        if(p.y > heightAtTexel)
         {
-            hitHeight = heightAtTexel;
-            return true;
+            float worldTexelSize = _ChunkSize / mipSize.xy;
+            float2 worldTexelPos1 = mipTexel * worldTexelSize;
+            float2 worldTexelPos2 = (mipTexel + 1) * worldTexelSize;
+            
+            //If ray's direction is +x ray goes through the right side, else the left side
+            float xBoundary = (rd.x > 0.f) ? worldTexelPos2.x :  worldTexelPos1.x;
+            float zBoundary = (rd.z > 0.f) ? worldTexelPos2.y : worldTexelPos1.y;
+            
+            //Computing exit point
+            float2 exitPoint = float2(1e30, 1e30);
+            if(rd.x>0)
+                exitPoint.x = (xBoundary - ro.x) / rd.x;
+            if(rd.z>0)
+                exitPoint.y = (zBoundary - ro.z) / rd.z;
+            
+            //Decide which neighbour to enter
+            int2 stepDirection;
+            stepDirection.x = (rd.x > 0.f) ? 1 : (rd.x < 0.f) ? -1 : 0;
+            stepDirection.y = (rd.z > 0.f) ? 1 : (rd.z < 0.f) ? -1 : 0;       
+            
+            //which wall hit first?
+            if(exitPoint.x < exitPoint.y)
+                mipTexel.x += + stepDirection.x;
+            else
+                mipTexel.y += stepDirection.y;
+            
+            //Hits corner if they are mostly even
+            if (abs(exitPoint.x - exitPoint.y) < 1e-6)
+                mipTexel += stepDirection;
+            
+            //Change ray accordingly to the next texel
+            float tExit = min(exitPoint.x, exitPoint.y);
+            t = tExit;
+            p = ro + rd * t;
         }
+        else
+        {
+            float heightAtTexel = SampleTerrainHeight(p.xz, 0);
 
-        float stepSize = clamp(abs(dist) * 0.25f, 0.02f, 20.0f);
-        t += stepSize;
+            float dist = p.y - heightAtTexel;
 
-        if (t > _MaxDistance)
-            break;
+            if (abs(dist) < _DistanceForHit)
+            {
+                hitHeight = heightAtTexel;
+                return true;
+            }
+
+            float stepSize = clamp(abs(dist) * 0.25f, 0.02f, 20.0f);
+            t += stepSize;
+
+            if (t > _MaxDistance)
+                break;
+        }
     }       
     return false;
 }
