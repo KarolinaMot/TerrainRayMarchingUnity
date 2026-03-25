@@ -272,7 +272,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7817cd5ecbb5e284189d7664215d815b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  maxSteps: 128
+  maxSteps: 256
   maxDistance: 512
   distanceForHit: 1
   grassColor: {r: 0.18349235, g: 0.4339623, b: 0.104396574, a: 0}
