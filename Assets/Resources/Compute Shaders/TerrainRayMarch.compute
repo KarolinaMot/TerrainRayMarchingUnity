@@ -245,7 +245,7 @@ float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims
     //return u.x;
 }
 
-bool IntersectTerrainXZBounds(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float tEnter, out float tExit)
+bool GetBoundsExit(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float tEnter, out float tExit)
 {
     // Precompute inverse ray direction (used to replace division with multiplication)
     float2 invDir = 1.0 / rd.xz;
@@ -272,26 +272,6 @@ bool IntersectTerrainXZBounds(float3 ro, float3 rd, float2 minPos, float2 maxPos
     return tExit >= max(tEnter, 0.0);
 }
 
-float ComputeCellExitT(float3 ro, float3 rd, float currentT, float2 cellMinXZ, float2 cellMaxXZ)
-{
-    float tx = 1e30;
-    float tz = 1e30;
-
-    if (abs(rd.x) > 1e-8)
-    {
-        float xBoundary = (rd.x > 0.0) ? cellMaxXZ.x : cellMinXZ.x;
-        tx = (xBoundary - ro.x) / rd.x;
-    }
-
-    if (abs(rd.z) > 1e-8)
-    {
-        float zBoundary = (rd.z > 0.0) ? cellMaxXZ.y : cellMinXZ.y;
-        tz = (zBoundary - ro.z) / rd.z;
-    }
-
-    float tExit = min(tx, tz);
-    return max(tExit, currentT + 1e-5);
-}
 
 float LoadMipHeight(int2 texel, uint2 mipSize, int mip, uint2 dimensions)
 {
@@ -312,48 +292,14 @@ void GetTexelWorldPos(float2 mipSize, uint2 texel, out float2 worldTexelPos1, ou
     worldTexelPos2 = float2(texel + 1) * worldTexelSize;
 }
 
-void StepToNextTexel(float2 mipSize, float3 rd, float3 ro, float mip, out float t, out float3 p, inout uint2 texel, out float tExit)
+void StepToNextTexel(float2 mipSize, float3 rd, float3 ro, float mip, out float t, inout uint2 texel, out float tExit)
 {
     float2 worldTexelPos1, worldTexelPos2;    
     GetTexelWorldPos(mipSize, texel, worldTexelPos1, worldTexelPos2);
-            
-    //If ray's direction is +x ray goes through the right side, else the left side
-    float xBoundary = (rd.x > 0.f) ? worldTexelPos2.x : worldTexelPos1.x;
-    float zBoundary = (rd.z > 0.f) ? worldTexelPos2.y : worldTexelPos1.y;
-            
-    //Computing exit point
-    float2 exitPoint = float2(1e30, 1e30);
-    if (abs(rd.x) > 1e-8)
-        exitPoint.x = (xBoundary - ro.x) / rd.x;
-
-    if (abs(rd.z) > 1e-8)
-        exitPoint.y = (zBoundary - ro.z) / rd.z;
-            
-    //Decide which neighbour to enter
-    int2 stepDirection;
-    stepDirection.x = (rd.x > 0.f) ? 1 : (rd.x < 0.f) ? -1 : 0;
-    stepDirection.y = (rd.z > 0.f) ? 1 : (rd.z < 0.f) ? -1 : 0;
-
-    //which wall hit first?
-    if (abs(exitPoint.x - exitPoint.y) < 1e-6)
-    {
-        texel += stepDirection;
-    }
-    else if (exitPoint.x < exitPoint.y)
-    {
-        texel.x += stepDirection.x;
-    }
-    else
-    {
-        texel.y += stepDirection.y;
-    }
-            
-    texel = clamp(texel, int2(0, 0), int2(mipSize.xy) - 1);
     
-    //Change ray accordingly to the next texel
-    tExit = min(exitPoint.x, exitPoint.y);
-    t = tExit + 0.05f;
-    p = ro + rd * t;
+    float tEnter;
+    GetBoundsExit(ro, rd, worldTexelPos1, worldTexelPos2, tEnter, tExit);
+    t = tExit + 0.5f;
 }
 
 bool RefineHitInCell(
@@ -436,7 +382,8 @@ bool TraverseHeightfieldMaxMip(
     hitHeight = 0.0;
     
     float tEnter, tExitDomain;
-    if (!IntersectTerrainXZBounds(ro, rd, tEnter, tExitDomain))
+    if (!GetBoundsExit(ro, rd, float2(0.f, 0.f), float2(_ChunkSize, _ChunkSize),
+        tEnter, tExitDomain))
         return false;
 
     //jumping to the point where the terrain begins
@@ -447,12 +394,12 @@ bool TraverseHeightfieldMaxMip(
     
     bool rayAboveHeightField = true;
     
-    float3 p = ro + rd * t;
 
     for (int i = 0; i < _MaxSteps; i++)
     {
         uint3 mipSize;
         _HeightMap.GetDimensions(mip, mipSize.x, mipSize.y, mipSize.z);
+        float3 p = ro + rd * t;
 
         float2 mipUV = p.xz / _ChunkSize;
         int2 mipTexel = int2(floor(mipUV * float2(mipSize.xy)));
@@ -462,46 +409,32 @@ bool TraverseHeightfieldMaxMip(
         
         if (p.y <= heightAtTexel && mip == 0)
         {
-            //float2 worldTexelPos1, worldTexelPos2;
-            //GetTexelWorldPos(mipSize.xy, mipTexel, worldTexelPos1, worldTexelPos2);
+            float2 worldTexelPos1, worldTexelPos2;
+            GetTexelWorldPos(mipSize.xy, mipTexel, worldTexelPos1, worldTexelPos2);
 
-            //for (int i = 0; i < 160; i++)
-            //{
-            //    hitPos = ro + rd * hitT;
-
-            //    if (!IsInsideChunk(hitPos.xz))
-            //        return false;
-
-            //    float h = TerrainHeight(hitPos.xz);
-            //    float dist = hitPos.y - h;
-                
-            //    if (abs(dist) < _DistanceForHit)
-            //    {
-            //        hitHeight = h;
-            //        return true;
-            //    }
-
-            //    float stepSize = clamp(abs(dist) * 0.29f, 0.02f, 500.0f);
-            //    hitT += stepSize;
-
-            //    bool outsideBounds = p.x < worldTexelPos1.x || p.x > worldTexelPos2.x || p.z < worldTexelPos1.y || p.z > worldTexelPos2.y;
-            //    if (hitT > _MaxDistance || outsideBounds)
-            //        break;
-            //}
-            float tCellExit = ComputeCellExitT(...); // for current mip-0 cell
-            tCellExit = min(tCellExit, tExitDomain);
-
-            if (RefineHitInCell(ro, rd, t, tCellExit, refinedT, refinedH))
-            float refinedT, refinedH;
-            if (RefineHitInCell(ro, rd, t, tExitDomain, refinedT, refinedH))
+            for (int i = 0; i < 160; i++)
             {
-                hitT = refinedT;
                 hitPos = ro + rd * hitT;
-                hitHeight = refinedH;
-                return true;
-            }
 
-            t = tExitDomain + 1e-5;
+                if (!IsInsideChunk(hitPos.xz))
+                    return false;
+
+                float h = TerrainHeight(hitPos.xz);
+                float dist = hitPos.y - h;
+                
+                if (abs(dist) < _DistanceForHit)
+                {
+                    hitHeight = h;
+                    return true;
+                }
+
+                float stepSize = clamp(abs(dist) * 0.29f, 0.02f, 500.0f);
+                hitT += stepSize;
+
+                bool outsideBounds = p.x < worldTexelPos1.x || p.x > worldTexelPos2.x || p.z < worldTexelPos1.y || p.z > worldTexelPos2.y;
+                if (hitT > _MaxDistance || outsideBounds)
+                    break;
+            }
         }
         else if (p.y <= heightAtTexel)
         {
@@ -509,7 +442,7 @@ bool TraverseHeightfieldMaxMip(
         }
         else
         {
-            StepToNextTexel(mipSize.xy, rd, ro, mip, t, p, mipTexel, tExitDomain);
+            StepToNextTexel(mipSize.xy, rd, ro, mip, t, mipTexel, tExitDomain);
             mip = min(dimensions.z-1, mip + 1);
         }
    
