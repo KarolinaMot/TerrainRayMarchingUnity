@@ -245,19 +245,15 @@ float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims
     //return u.x;
 }
 
-bool IntersectTerrainXZBounds(float3 ro, float3 rd, out float tEnter, out float tExit)
+bool IntersectTerrainXZBounds(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float tEnter, out float tExit)
 {
-   // Compute world-space bounds of the terrain chunk
-    float2 chunkMin = _ChunkCoord * _ChunkSize; // bottom-left corner (XZ)
-    float2 chunkMax = chunkMin + _ChunkSize; // top-right corner (XZ)
-
     // Precompute inverse ray direction (used to replace division with multiplication)
     float2 invDir = 1.0 / rd.xz;
 
     // Compute intersection distances (t) with the two X planes and two Z planes
     // These represent where the ray hits the min and max boundaries
-    float2 t0 = (chunkMin - ro.xz) * invDir; // intersection with min planes
-    float2 t1 = (chunkMax - ro.xz) * invDir; // intersection with max planes
+    float2 t0 = (minPos - ro.xz) * invDir; // intersection with min planes
+    float2 t1 = (maxPos - ro.xz) * invDir; // intersection with max planes
 
     // For each axis, determine which intersection is entry and which is exit
     // (depends on ray direction sign)
@@ -360,30 +356,70 @@ void StepToNextTexel(float2 mipSize, float3 rd, float3 ro, float mip, out float 
     p = ro + rd * t;
 }
 
-bool IntersectBilinearPatch(float2 mipSize, uint2 texel, float3 ro, float3 rd)
+bool RefineHitInCell(
+    float3 ro,
+    float3 rd,
+    float tEnterCell,
+    float tExitCell,
+    out float hitT,
+    out float hitHeight)
 {
-    //Search boundaries within the cell
-    float2 worldTexelPos1, worldTexelPos2;
-    GetTexelWorldPos(mipSize, texel, worldTexelPos1, worldTexelPos2);
+    hitT = 0.0;
+    hitHeight = 0.0;
 
-    float2 h00 = SampleTerrainHeight(worldTexelPos1);
-    float2 h10 = SampleTerrainHeight(float2(worldTexelPos2.x, worldTexelPos1.y));
-    float2 h11 = SampleTerrainHeight(worldTexelPos2);
-    float2 h01 = SampleTerrainHeight(float2(worldTexelPos1.x, worldTexelPos2.y));
-    
-    float2 cellSize = worldTexelPos1 - worldTexelPos2;
-    float ux0 = (ro.x - worldTexelPos1.x) / cellSize.x;
-    float ux1 = rd.x / cellSize.x;
-    float vz0 = (ro.z - worldTexelPos1.y) / cellSize.y;
-    float vz1 = rd.z / cellSize.y;
-    
-    
-    
-    //Local coordinates
-    
-    
+    const int linearSteps = 8;
+
+    float prevT = tEnterCell;
+    float3 prevP = ro + rd * prevT;
+    float prevF = prevP.y - TerrainHeight(prevP.xz);
+
+    if (prevF <= _DistanceForHit)
+    {
+        hitT = prevT;
+        hitHeight = TerrainHeight(prevP.xz);
+        return true;
+    }
+
+    [unroll]
+    for (int i = 1; i <= linearSteps; i++)
+    {
+        float alpha = (float) i / (float) linearSteps;
+        float currT = lerp(tEnterCell, tExitCell, alpha);
+        float3 currP = ro + rd * currT;
+        float currF = currP.y - TerrainHeight(currP.xz);
+
+        // first bracket found
+        if (prevF > 0.0 && currF <= 0.0)
+        {
+            float a = prevT;
+            float b = currT;
+
+            [unroll]
+            for (int j = 0; j < 8; j++)
+            {
+                float m = 0.5 * (a + b);
+                float3 pm = ro + rd * m;
+                float fm = pm.y - TerrainHeight(pm.xz);
+
+                if (fm > 0.0)
+                    a = m;
+                else
+                    b = m;
+            }
+
+            hitT = b;
+            float3 hp = ro + rd * hitT;
+            hitHeight = TerrainHeight(hp.xz);
+            return true;
+        }
+
+        prevT = currT;
+        prevF = currF;
+    }
+
     return false;
 }
+
 
 bool TraverseHeightfieldMaxMip(
     float3 ro,
@@ -426,28 +462,46 @@ bool TraverseHeightfieldMaxMip(
         
         if (p.y <= heightAtTexel && mip == 0)
         {
-            for (int i = 0; i < 160; i++)
-            {
-                hitPos = ro + rd * hitT;
+            //float2 worldTexelPos1, worldTexelPos2;
+            //GetTexelWorldPos(mipSize.xy, mipTexel, worldTexelPos1, worldTexelPos2);
 
-                if (!IsInsideChunk(hitPos.xz))
-                    return false;
+            //for (int i = 0; i < 160; i++)
+            //{
+            //    hitPos = ro + rd * hitT;
 
-                float h = TerrainHeight(hitPos.xz);
-                float dist = hitPos.y - h;
+            //    if (!IsInsideChunk(hitPos.xz))
+            //        return false;
+
+            //    float h = TerrainHeight(hitPos.xz);
+            //    float dist = hitPos.y - h;
                 
-                if (abs(dist) < _DistanceForHit)
-                {
-                    hitHeight = h;
-                    return true;
-                }
+            //    if (abs(dist) < _DistanceForHit)
+            //    {
+            //        hitHeight = h;
+            //        return true;
+            //    }
 
-                float stepSize = clamp(abs(dist) * 0.29f, 0.02f, 500.0f);
-                hitT += stepSize;
+            //    float stepSize = clamp(abs(dist) * 0.29f, 0.02f, 500.0f);
+            //    hitT += stepSize;
 
-                if (hitT > _MaxDistance)
-                    break;
+            //    bool outsideBounds = p.x < worldTexelPos1.x || p.x > worldTexelPos2.x || p.z < worldTexelPos1.y || p.z > worldTexelPos2.y;
+            //    if (hitT > _MaxDistance || outsideBounds)
+            //        break;
+            //}
+            float tCellExit = ComputeCellExitT(...); // for current mip-0 cell
+            tCellExit = min(tCellExit, tExitDomain);
+
+            if (RefineHitInCell(ro, rd, t, tCellExit, refinedT, refinedH))
+            float refinedT, refinedH;
+            if (RefineHitInCell(ro, rd, t, tExitDomain, refinedT, refinedH))
+            {
+                hitT = refinedT;
+                hitPos = ro + rd * hitT;
+                hitHeight = refinedH;
+                return true;
             }
+
+            t = tExitDomain + 1e-5;
         }
         else if (p.y <= heightAtTexel)
         {
@@ -573,7 +627,7 @@ void Main (uint3 id : SV_DispatchThreadID)
         }
         
         col.rgb = mat.baseColor;
-        col.rgb *= shadow;
+        //col.rgb *= shadow;
     }
     else
     {
