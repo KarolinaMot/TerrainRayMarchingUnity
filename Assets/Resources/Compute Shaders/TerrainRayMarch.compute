@@ -16,7 +16,6 @@ float _DistanceForHit;
 //Heightmap and info
 Texture2D<float> _HeightMap;
 float _ChunkSize;
-float2 _ChunkCoord;
 
 //Material values
 float4 _GrassColorRoughness;
@@ -71,28 +70,22 @@ float4 BiomeColor(float height)
 
 bool IsInsideChunk(float2 worldXZ)
 {
-    float2 chunkMin = _ChunkCoord * _ChunkSize;
+    float2 chunkMin = 0.f;
     float2 chunkMax = chunkMin + _ChunkSize;
 
     return worldXZ.x >= chunkMin.x && worldXZ.x <= chunkMax.x &&
            worldXZ.y >= chunkMin.y && worldXZ.y <= chunkMax.y;
 }
 
-float TerrainHeight(float2 xz)
+float SampleTerrainHeight(float2 xz)
 {
-    float2 chunkOffset = _ChunkCoord * _ChunkSize;
-    float2 localXZ = xz - chunkOffset;
-    float2 uv = localXZ / _ChunkSize;
-
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
-        return -1e20f; // no terrain here
-
-    return _HeightMap.SampleLevel(sampler_HeightMap, uv, 0);
+    float2 uv = xz / _ChunkSize;
+    return _HeightMap.SampleLevel(linearClampSampler, uv, 0);
 }
 
 bool IsBelowTerrain(float3 camPos)
 {
-    float h = TerrainHeight(camPos.xz);
+    float h = SampleTerrainHeight(camPos.xz);
 
     if (h < -1e10f)
         return false;
@@ -102,7 +95,7 @@ bool IsBelowTerrain(float3 camPos)
 
 float TerrainDistance(float3 p, bool below)
 {
-   float d =  p.y - TerrainHeight(p.xz);
+    float d = p.y - SampleTerrainHeight(p.xz);
    
    if (below)
         d = -d;
@@ -121,7 +114,7 @@ float Shadow(float3 ro, float3 rd, float mint, float maxt)
     for (int i = 0; i < steps && t < maxt; i++)
     {
         float3 p = ro + rd * t;
-        float terrainY = TerrainHeight(p.xz);
+        float terrainY = SampleTerrainHeight(p.xz);
         float h = p.y - terrainY;
 
         if (h < thickness)
@@ -226,7 +219,7 @@ float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims
         for (int i = 0; i < _ShadowSteps && t < tmax; i++)
         {
             float3 p = rayStart + lightDir * t;
-            float terrainY = TerrainHeight(p.xz);
+            float terrainY = SampleTerrainHeight(p.xz);
 
             if (p.y <= terrainY + 0.05f)
             {
@@ -247,42 +240,32 @@ float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims
 
 bool GetBoundsExit(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float tEnter, out float tExit)
 {
-    // Precompute inverse ray direction (used to replace division with multiplication)
+    tEnter = -1e38;
+    tExit = 1e38;
+
+    const float EPSILON = 1e-8;
+
     float2 invDir = 1.0 / rd.xz;
+    float2 t0 = (minPos - ro.xz) * invDir;
+    float2 t1 = (maxPos - ro.xz) * invDir;
 
-    // Compute intersection distances (t) with the two X planes and two Z planes
-    // These represent where the ray hits the min and max boundaries
-    float2 t0 = (minPos - ro.xz) * invDir; // intersection with min planes
-    float2 t1 = (maxPos - ro.xz) * invDir; // intersection with max planes
+    float2 tNear = min(t0, t1);
+    float2 tFar = max(t0, t1);
 
-    // For each axis, determine which intersection is entry and which is exit
-    // (depends on ray direction sign)
-    float2 tmin2 = min(t0, t1); // entry distances per axis
-    float2 tmax2 = max(t0, t1); // exit distances per axis
+    tEnter = max(tNear.x, tNear.y);
+    tExit = min(tFar.x, tFar.y);
 
-    // Combine X and Z slabs:
-    // - we enter the box at the later of the two entry points
-    // - we exit the box at the earlier of the two exit points
-    tEnter = max(tmin2.x, tmin2.y); // entry into both X and Z
-    tExit = min(tmax2.x, tmax2.y); // exit from either X or Z
+    if (tExit < max(tEnter, 0.0))
+        return false;
 
-    // Valid intersection if:
-    // 1. exit happens after entry (overlapping interval)
-    // 2. intersection is in front of the ray (t >= 0)
-    return tExit >= max(tEnter, 0.0);
+    return true;
 }
 
 
 float LoadMipHeight(int2 texel, uint2 mipSizeInPixels, int mip, uint2 dimensions)
 {
-    texel = clamp(texel, int2(0, 0), mipSizeInPixels - 1);
+    //texel = clamp(texel, int2(0, 0), mipSizeInPixels - 1);
     return _HeightMap.Load(int3(texel, mip));
-}
-
-float SampleTerrainHeight(float2 xz)
-{
-    float2 uv = xz / _ChunkSize;
-    return _HeightMap.SampleLevel(sampler_HeightMap, uv, 0);
 }
 
 void GetTexelWorldPos(float2 mipSizeInPixels, uint2 texel, out float2 worldTexelPos1, out float2 worldTexelPos2)
@@ -301,107 +284,99 @@ bool TraverseHeightfieldMaxMip(
 {
     uint3 dimensions;
     _HeightMap.GetDimensions(0, dimensions.x, dimensions.y, dimensions.z);
-    
+
     hitT = 0.0;
     hitPos = 0.0;
     hitHeight = 0.0;
-    
+
     float tEnter, tExitDomain;
-    if (!GetBoundsExit(ro, rd, float2(0.f, 0.f), float2(_ChunkSize, _ChunkSize),
-        tEnter, tExitDomain))
+    if (!GetBoundsExit(ro, rd, float2(0.0, 0.0), float2(_ChunkSize, _ChunkSize), tEnter, tExitDomain))
         return false;
 
-    //jumping to the point where the terrain begins
     float t = max(tEnter, 0.0);
+    float tMax = min(tExitDomain, _MaxDistance);
 
-    // Starting a bit below the top is often more practical than starting at the root
-    int mip = max(0, dimensions.z-2);
-    
-    bool rayAboveHeightField = true;
-    
-    for (int i = 0; i < _MaxSteps; i++)
+    int mip = max(0, (int) dimensions.z - 2);
+
+    for (int i = 0; i < _MaxSteps && t < tMax; i++)
     {
-        //Getting height at texel
-        uint3 mipSizeInPixels;
-        _HeightMap.GetDimensions(mip, mipSizeInPixels.x, mipSizeInPixels.y, mipSizeInPixels.z);
         float3 p = ro + rd * t;
 
-        float2 mipUV = p.xz / _ChunkSize;
-        int2 mipTexelPixelCoordinates = int2(floor(mipUV * float2(mipSizeInPixels.xy)));
-        mipTexelPixelCoordinates = clamp(mipTexelPixelCoordinates, int2(0, 0), int2(mipSizeInPixels.xy) - 1);
+        uint3 mipSize;
+        _HeightMap.GetDimensions(mip, mipSize.x, mipSize.y, mipSize.z);
 
-        float heightAtTexel = LoadMipHeight(mipTexelPixelCoordinates, mipSizeInPixels.xy, mip, dimensions.xy);
-        
-        //Getting minimum height of ray within the current segment
-        float2 worldTexelPos1, worldTexelPos2;
-        GetTexelWorldPos(mipSizeInPixels.xy, mipTexelPixelCoordinates, worldTexelPos1, worldTexelPos2);
+        float2 uv = p.xz / _ChunkSize;
+        int2 cell = clamp((int2) floor(uv * mipSize.xy), int2(0, 0), int2(mipSize.xy) - 1);
+
+        float cellHeight = LoadMipHeight(cell, mipSize.xy, mip, dimensions.xy);
+
+        float2 cellMin, cellMax;
+        GetTexelWorldPos(mipSize.xy, cell, cellMin, cellMax);
 
         float tCellEnter, tCellExit;
-        GetBoundsExit(ro, rd, worldTexelPos1, worldTexelPos2, tCellEnter, tCellExit);
+        if (!GetBoundsExit(ro, rd, cellMin, cellMax, tCellEnter, tCellExit))
+            return false;
 
         tCellEnter = max(tCellEnter, t);
-        tCellExit = min(tCellExit, tExitDomain);
+        tCellExit = min(tCellExit, tMax);
 
-        //Height of ray when it enters cell
+        if (tCellExit <= tCellEnter)
+        {
+            t += 0.5f;
+            continue;
+        }
+
         float y0 = ro.y + rd.y * tCellEnter;
-        //Height of ray when it exits cell
         float y1 = ro.y + rd.y * tCellExit;
         float segMinY = min(y0, y1);
-        
-        if (segMinY > heightAtTexel)
+
+        if (mip > 0)
         {
-            t = tCellExit + 0.5f;
-            mip = min(dimensions.z, mip + 1);
-        }
-        else if (mip >0)
-        {
-            mip--;
+            if (segMinY > cellHeight)
+            {
+                t = tCellExit + 0.5f;
+            }
+            else
+            {
+                mip--;
+            }
         }
         else
         {
-            float2 worldTexelPos1, worldTexelPos2;
-            GetTexelWorldPos(mipSizeInPixels.xy, mipTexelPixelCoordinates, worldTexelPos1, worldTexelPos2);
-            hitT = tCellEnter;
-            for (int i = 0; i < 100; i++)
-            {
-                hitPos = ro + rd * hitT;
+            float dt = max((tCellExit - tCellEnter) / 8.0f, 1e-3f);
+            float tf = tCellEnter;
 
-                float h = TerrainHeight(hitPos.xz);
-                float dist = hitPos.y - h;
-                
-                if (abs(dist) < _DistanceForHit)
+            while (tf <= tCellExit)
+            {
+                float3 pf = ro + rd * tf;
+                float h = SampleTerrainHeight(pf.xz);
+
+                if (pf.y <= h)
                 {
+                    hitT = tf;
+                    hitPos = pf;
                     hitHeight = h;
                     return true;
                 }
 
-                float stepSize = clamp(abs(dist) * 0.1f, 0.02f, 500.0f);
-                hitT += stepSize;
-
-                bool outsideBounds = hitPos.x < worldTexelPos1.x || hitPos.x > worldTexelPos2.x || hitPos.z < worldTexelPos1.y || hitPos.z > worldTexelPos2.y;
-                if (hitT > _MaxDistance || outsideBounds)
-                {
-                    t = tCellExit + 0.5f;
-                    mip = max(0, mip - 1);
-                    break;
-                }
+                tf += dt;
             }
+
+            t = tCellExit +0.5f;
+            mip = 1;
         }
-
-   
     }
+
     return false;
-    
 }
-
-float3 GetNormal(float3 p, bool below)
+float3 GetNormal(float3 p, bool below, float t)
 {
-    float e = 0.1f; // tune based on your world scale
+    float e = 1e-2 * t; // tune based on your world scale
 
-    float hL = TerrainHeight(p.xz - float2(e, 0));
-    float hR = TerrainHeight(p.xz + float2(e, 0));
-    float hD = TerrainHeight(p.xz - float2(0, e));
-    float hU = TerrainHeight(p.xz + float2(0, e));
+    float hL = SampleTerrainHeight(p.xz - float2(e, 0));
+    float hR = SampleTerrainHeight(p.xz + float2(e, 0));
+    float hD = SampleTerrainHeight(p.xz - float2(0, e));
+    float hU = SampleTerrainHeight(p.xz + float2(0, e));
 
     float dhdx = (hR - hL) / (2.0f * e);
     float dhdz = (hU - hD) / (2.0f * e);
@@ -460,7 +435,7 @@ void Main (uint3 id : SV_DispatchThreadID)
     if (hit)
     {
         float3 p = cameraPos + rayDirection * hitT;
-        float3 n = GetNormal(p, belowTerrain);
+        float3 n = GetNormal(p, belowTerrain, hitT);
         float4 biomeValue = BiomeColor(elevation);
         
         PBRMaterial mat;
@@ -502,8 +477,9 @@ void Main (uint3 id : SV_DispatchThreadID)
             shadow = Shadow(p + n * 0.02f, sunDir, 0.01f, _MaxDistance);
         }
         
-        col.rgb = mat.baseColor;
-        //col.rgb *= shadow;
+        //col.rgb = elevation / 100.0;
+        col.rgb = diffuse;
+        col.rgb *= shadow;
     }
     else
     {
