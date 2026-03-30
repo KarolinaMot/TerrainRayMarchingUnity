@@ -272,7 +272,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7817cd5ecbb5e284189d7664215d815b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  maxSteps: 160
+  maxSteps: 550
+  maxStepsOptimized: 524
   maxDistance: 11781
   distanceForHit: 1
   grassColor: {r: 0.18349235, g: 0.4339623, b: 0.104396574, a: 0}
@@ -291,6 +292,7 @@ MonoBehaviour:
   shadowSamples: 1
   useBlueNoise: 0
   pathTracedShadows: 1
+  optimizeTracing: 1
 --- !u!114 &330585549
 MonoBehaviour:
   m_ObjectHideFlags: 0

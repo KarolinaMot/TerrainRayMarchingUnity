@@ -10,6 +10,7 @@
 
 //Ray marching parameters
 int _MaxSteps;
+int _MaxStepsOptimized;
 int _MaxDistance;
 float _DistanceForHit;
 
@@ -37,6 +38,7 @@ float _ShadowSteps;
 uint _ShadowSamples;
 uint _UseBlueNoise;
 uint _UsePathtracedShadows;
+uint _UseRaymarchOptimization;
 
 //Other
 float4 _SunDirectionIntensity;
@@ -297,8 +299,8 @@ bool TraverseHeightfieldMaxMip(
     float tMax = min(tExitDomain, _MaxDistance);
 
     int mip = max(0, (int) dimensions.z - 2);
-
-    for (int i = 0; i < _MaxSteps && t < tMax; i++)
+    float e = 1e-3f;
+    for (int i = 0; i < _MaxStepsOptimized && t < tMax; i++)
     {
         float3 p = ro + rd * t;
 
@@ -322,7 +324,7 @@ bool TraverseHeightfieldMaxMip(
 
         if (tCellExit <= tCellEnter)
         {
-            t += 0.5f;
+            t += e;
             continue;
         }
 
@@ -334,7 +336,7 @@ bool TraverseHeightfieldMaxMip(
         {
             if (segMinY > cellHeight)
             {
-                t = tCellExit + 0.5f;
+                t = tCellExit + e;
             }
             else
             {
@@ -362,13 +364,46 @@ bool TraverseHeightfieldMaxMip(
                 tf += dt;
             }
 
-            t = tCellExit +0.5f;
+            t = tCellExit +e;
             mip = 1;
         }
     }
 
     return false;
 }
+
+float Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terrainHeightAtHit)
+{
+    float t = 0.0;
+    terrainHeightAtHit = 0.0;
+
+    for (int i = 0; i < _MaxSteps; i++)
+    {
+        float3 p = rOrigin + rDirection * t;
+
+        if (!IsInsideChunk(p.xz))
+            return false;
+
+        float h = SampleTerrainHeight(p.xz);
+        float dist = p.y - h;
+
+        if (abs(dist) < _DistanceForHit)
+        {
+            terrainHeightAtHit = h;
+            hitT = t;
+            return true;
+        }
+
+        float stepSize = clamp(abs(dist) * 0.25f, 0.02f, 20.0f);
+        t += stepSize;
+
+        if (t > _MaxDistance)
+            break;
+    }
+
+    return false;
+}
+
 float3 GetNormal(float3 p, bool below, float t)
 {
     float e = 1e-2 * t; // tune based on your world scale
@@ -428,10 +463,17 @@ void Main (uint3 id : SV_DispatchThreadID)
     float3 hitPos;
     float debugGrid = 0.f;
 
-    bool hit = TraverseHeightfieldMaxMip(cameraPos, rayDirection, hitT, hitPos, elevation);
-   // bool hit = Raymarch(cameraPos, rayDirection, belowTerrain, elevation, hitT);
+    bool hit = false;
     
-
+    if(_UseRaymarchOptimization)
+    {
+        hit = TraverseHeightfieldMaxMip(cameraPos, rayDirection, hitT, hitPos, elevation);
+    }
+    else
+    {
+        hit = Raymarch(cameraPos, rayDirection, hitT, elevation);
+    }
+    
     if (hit)
     {
         float3 p = cameraPos + rayDirection * hitT;
@@ -478,8 +520,9 @@ void Main (uint3 id : SV_DispatchThreadID)
         }
         
         //col.rgb = elevation / 100.0;
-        col.rgb = diffuse;
-        col.rgb *= shadow;
+        col.rgb = diffuse + specular;
+        //col.rgb = shadow.xxx;
+        //col.rgb = mat.normal + 0.5f *0.5f;
     }
     else
     {

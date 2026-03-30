@@ -14,6 +14,7 @@ public class SdfRenderer : MonoBehaviour
 
     [Header("Ray-marching")]
     public int maxSteps = 100;
+    public int maxStepsOptimized = 100;
     public int maxDistance = 100;
     public float distanceForHit = 0.001f;
     [Space(10)]
@@ -40,6 +41,7 @@ public class SdfRenderer : MonoBehaviour
     public int shadowSamples = 16;
     public bool useBlueNoise = true;
     public bool pathTracedShadows = true;
+    public bool optimizeTracing = true;
 
     private RenderTexture[] temporalShadow = new RenderTexture[2];
     private Vector3 prevCameraPos = Vector3.zero;
@@ -202,6 +204,7 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeVectorParam(marchCS, "_SandColorRoughness", sandColorRoughness);
         cmd.SetComputeVectorParam(marchCS, "_ForestColorRoughness", forestColorRoughness);
         cmd.SetComputeVectorParam(marchCS, "_RockColorRoughness", rockColorRoughness);
+        cmd.SetComputeFloatParam(marchCS, "_MaxStepsOptimized", maxStepsOptimized);
         cmd.SetComputeFloatParam(marchCS, "_GrassLevel", grassLevel);
         cmd.SetComputeFloatParam(marchCS, "_RockLevel", rockLevel);
         cmd.SetComputeFloatParam(marchCS, "_ForestLevel", forestLevel);
@@ -217,6 +220,7 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeIntParam(marchCS, "_ShadowSamples", (int)shadowSamples);
         cmd.SetComputeIntParam(marchCS, "_UseBlueNoise", useBlueNoise ? 1 : 0);
         cmd.SetComputeIntParam(marchCS, "_UsePathtracedShadows", pathTracedShadows ? 1 : 0);
+        cmd.SetComputeIntParam(marchCS, "_UseRaymarchOptimization", optimizeTracing ? 1 : 0);
         cmd.SetComputeTextureParam(marchCS, kernel, "_TemporalShadow", temporalShadow[Time.frameCount % 2]);
         cmd.SetComputeTextureParam(marchCS, kernel, "_TemporalShadowPrev", temporalShadow[(Time.frameCount + 1) % 2]);
     }
