@@ -212,6 +212,141 @@ float Shadow(float3 ro, float3 rd, float mint, float maxt)
     return 1.f;
 }
 
+bool GetBoundsExit(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float tEnter, out float tExit)
+{
+    tEnter = -1e38;
+    tExit = 1e38;
+
+    const float EPSILON = 1e-8;
+
+    float2 invDir = 1.0 / rd.xz;
+    float2 t0 = (minPos - ro.xz) * invDir;
+    float2 t1 = (maxPos - ro.xz) * invDir;
+
+    float2 tNear = min(t0, t1);
+    float2 tFar = max(t0, t1);
+
+    tEnter = max(tNear.x, tNear.y);
+    tExit = min(tFar.x, tFar.y);
+
+    if (tExit < max(tEnter, 0.0))
+        return false;
+
+    return true;
+}
+
+
+float LoadMipHeight(int2 texel, int mip)
+{
+    return _HeightMap.Load(int3(texel, mip));
+}
+
+void GetTexelWorldPos(float2 mipSizeInPixels, uint2 texel, out float2 worldTexelPos1, out float2 worldTexelPos2)
+{
+    float worldTexelSize = _ChunkSize / mipSizeInPixels;
+    worldTexelPos1 = float2(texel) * worldTexelSize;
+    worldTexelPos2 = float2(texel + 1) * worldTexelSize;
+}
+
+bool TraverseHeightfieldMaxMip(
+    float3 ro,
+    float3 rd,
+    out float hitT,
+    out float hitHeight,
+    float distanceForHit)
+{
+    uint3 dimensions;
+    _HeightMap.GetDimensions(0, dimensions.x, dimensions.y, dimensions.z);
+
+    hitT = 0.0;
+    hitHeight = 0.0;
+
+    float tEnter, tExitDomain;
+    if (!GetBoundsExit(ro, rd, float2(0.0, 0.0), float2(_ChunkSize, _ChunkSize), tEnter, tExitDomain))
+        return false;
+
+    float t = max(tEnter, 0.0);
+    float tMax = min(tExitDomain, _MaxDistance);
+
+    //int mip = max(dimensions.z - 2, 0);
+    int mip =0;
+    float e = 1e-3f;
+    //for (int i = 0; i < _MaxStepsOptimized && t < tMax; i++)
+    //{
+    //    float3 p = ro + rd * t;
+
+    //    uint3 mipSize;
+        
+    //    _HeightMap.GetDimensions(mip, mipSize.x, mipSize.y, mipSize.z);
+
+    //    float2 uv = p.xz / _ChunkSize;
+    //    int2 cell = clamp((int2) floor(uv * mipSize.xy), int2(0, 0), int2(mipSize.xy) - 1);
+
+    //    float cellHeight = LoadMipHeight(cell, mip);
+
+    //    float2 cellMin, cellMax;
+    //    GetTexelWorldPos(mipSize.xy, cell, cellMin, cellMax);
+
+    //    float tCellEnter, tCellExit;
+    //    if (!GetBoundsExit(ro, rd, cellMin, cellMax, tCellEnter, tCellExit))
+    //        return false;
+
+    //    tCellEnter = max(tCellEnter, t);
+    //    tCellExit = min(tCellExit, tMax);
+
+    //    if (tCellExit <= tCellEnter)
+    //    {
+    //        t += e;
+    //        continue;
+    //    }
+
+    //    float y0 = ro.y + rd.y * tCellEnter;
+    //    float y1 = ro.y + rd.y * tCellExit;
+    //    float segMinY = min(y0, y1);
+
+    //    if (mip > 0)
+    //    {
+    //        if (segMinY > cellHeight)
+    //        {
+    //            t = tCellExit + e;
+    //        }
+    //        else
+    //        {
+    //            mip--;
+    //        }
+    //    }
+    //    else
+    //    
+    float tCellEnter = 0.f;
+    float tCellExit = length(_ChunkSize);
+    
+    float dt = max((tCellExit - tCellEnter) / 8.0f, 1e-3f);
+    float tf = tCellEnter;
+
+    for (int i = 0; i < _MaxStepsOptimized; i++)//(tf <= tCellExit)
+    {
+        float3 pf = ro + rd * tf;
+        float h = SampleTerrainHeight(pf.xz);
+
+        if (pf.y - h <= distanceForHit)
+        {
+            hitT = tf;
+            hitHeight = h;
+            return true;
+        }
+
+        tf += dt;
+    }
+
+    t = tCellExit + e;
+    mip = max(0, (int) dimensions.z - 2);
+
+        //}
+   // }
+
+    return false;
+}
+
 
 float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims, float2 uv, uint seedBase)
 {
@@ -244,7 +379,8 @@ float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims
         float t = mint;
         float heightTerrain = 0.f;
         
-        bool blocked = Raymarch(ro, lightDir, t, heightTerrain, tmax, _ShadowSteps, -5.f);
+        //bool blocked = Raymarch(ro, lightDir, t, heightTerrain, tmax, _ShadowSteps, -5.f);
+        bool blocked = TraverseHeightfieldMaxMip(ro,lightDir, t, heightTerrain, _DistanceForHit);
 
         visibility += blocked ? AMBIENT_INTENSITY : 1.0f;
     }
@@ -252,135 +388,6 @@ float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims
     return visibility;
 }
 
-bool GetBoundsExit(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float tEnter, out float tExit)
-{
-    tEnter = -1e38;
-    tExit = 1e38;
-
-    const float EPSILON = 1e-8;
-
-    float2 invDir = 1.0 / rd.xz;
-    float2 t0 = (minPos - ro.xz) * invDir;
-    float2 t1 = (maxPos - ro.xz) * invDir;
-
-    float2 tNear = min(t0, t1);
-    float2 tFar = max(t0, t1);
-
-    tEnter = max(tNear.x, tNear.y);
-    tExit = min(tFar.x, tFar.y);
-
-    if (tExit < max(tEnter, 0.0))
-        return false;
-
-    return true;
-}
-
-
-float LoadMipHeight(int2 texel, uint2 mipSizeInPixels, int mip, uint2 dimensions)
-{
-    //texel = clamp(texel, int2(0, 0), mipSizeInPixels - 1);
-    return _HeightMap.Load(int3(texel, mip));
-}
-
-void GetTexelWorldPos(float2 mipSizeInPixels, uint2 texel, out float2 worldTexelPos1, out float2 worldTexelPos2)
-{
-    float worldTexelSize = _ChunkSize / mipSizeInPixels;
-    worldTexelPos1 = float2(texel) * worldTexelSize;
-    worldTexelPos2 = float2(texel + 1) * worldTexelSize;
-}
-
-bool TraverseHeightfieldMaxMip(
-    float3 ro,
-    float3 rd,
-    out float hitT,
-    out float hitHeight)
-{
-    uint3 dimensions;
-    _HeightMap.GetDimensions(0, dimensions.x, dimensions.y, dimensions.z);
-
-    hitT = 0.0;
-    hitHeight = 0.0;
-
-    float tEnter, tExitDomain;
-    if (!GetBoundsExit(ro, rd, float2(0.0, 0.0), float2(_ChunkSize, _ChunkSize), tEnter, tExitDomain))
-        return false;
-
-    float t = max(tEnter, 0.0);
-    float tMax = min(tExitDomain, _MaxDistance);
-
-    int mip = max(dimensions.z-2, 0);
-    float e = 1e-3f;
-    for (int i = 0; i < _MaxStepsOptimized && t < tMax; i++)
-    {
-        float3 p = ro + rd * t;
-
-        uint3 mipSize;
-        _HeightMap.GetDimensions(mip, mipSize.x, mipSize.y, mipSize.z);
-
-        float2 uv = p.xz / _ChunkSize;
-        int2 cell = clamp((int2) floor(uv * mipSize.xy), int2(0, 0), int2(mipSize.xy) - 1);
-
-        float cellHeight = LoadMipHeight(cell, mipSize.xy, mip, dimensions.xy);
-
-        float2 cellMin, cellMax;
-        GetTexelWorldPos(mipSize.xy, cell, cellMin, cellMax);
-
-        float tCellEnter, tCellExit;
-        if (!GetBoundsExit(ro, rd, cellMin, cellMax, tCellEnter, tCellExit))
-            return false;
-
-        tCellEnter = max(tCellEnter, t);
-        tCellExit = min(tCellExit, tMax);
-
-        if (tCellExit <= tCellEnter)
-        {
-            t += e;
-            continue;
-        }
-
-        float y0 = ro.y + rd.y * tCellEnter;
-        float y1 = ro.y + rd.y * tCellExit;
-        float segMinY = min(y0, y1);
-
-        if (mip > 0)
-        {
-            if (segMinY > cellHeight)
-            {
-                t = tCellExit + e;
-            }
-            else
-            {
-                mip--;
-            }
-        }
-        else
-        {
-            float dt = max((tCellExit - tCellEnter) / 8.0f, 1e-3f);
-            float tf = tCellEnter;
-
-            while (tf <= tCellExit)
-            {
-                float3 pf = ro + rd * tf;
-                float h = SampleTerrainHeight(pf.xz);
-
-                if (pf.y - h <= _DistanceForHit)
-                {
-                    hitT = tf;
-                    hitHeight = h;
-                    return true;
-                }
-
-                tf += dt;
-            }
-
-            t = tCellExit + e;
-            mip = max(0, (int) dimensions.z - 2);
-
-        }
-    }
-
-    return false;
-}
 
 
 float3 GetNormal(float3 p, bool below, float t, uint resolution)
@@ -447,7 +454,7 @@ void Main (uint3 id : SV_DispatchThreadID)
     
     if (_UseRaymarchOptimization)
     {
-         hit = TraverseHeightfieldMaxMip(cameraPos, rayDirection, hitT1, elevation);
+         hit = TraverseHeightfieldMaxMip(cameraPos, rayDirection, hitT1, elevation, _DistanceForHit);
     }
     else
     {
@@ -492,7 +499,7 @@ void Main (uint3 id : SV_DispatchThreadID)
             float newShadows = oldShadows + shadow;
             float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
             float shadowRes = newShadows / max(1.f, newShadowSampleNum);
-            shadow = shadowRes;
+            shadow = shadow;
             
             _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
         }
@@ -505,7 +512,7 @@ void Main (uint3 id : SV_DispatchThreadID)
         col.rgb = diffuse + specular;
         //col.rgb = (mat.normal + 1.f) * 0.5;
         //col.rgb = hitT/10000.f;
-        col.rgb *= shadow.xxx;
+        //col.rgb = shadow.xxx;
     }
     else
     {
