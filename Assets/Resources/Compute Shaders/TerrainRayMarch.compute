@@ -70,13 +70,10 @@ float4 BiomeColor(float height)
         return float4(_SnowColorRoughness.rgb, 0.6f);
 }
 
-bool IsInsideChunk(float2 worldXZ)
+bool IsInsideChunk(float2 worldXZ, float2 boundMin, float2 boundMax)
 {
-    float2 chunkMin = 0.f;
-    float2 chunkMax = chunkMin + _ChunkSize;
-
-    return worldXZ.x >= chunkMin.x && worldXZ.x <= chunkMax.x &&
-           worldXZ.y >= chunkMin.y && worldXZ.y <= chunkMax.y;
+    return worldXZ.x >= boundMin.x && worldXZ.x <= boundMax.x &&
+           worldXZ.y >= boundMin.y && worldXZ.y <= boundMax.y;
 }
 
 float SampleTerrainHeight(float2 xz)
@@ -105,31 +102,6 @@ float TerrainDistance(float3 p, bool below)
     return d;
 }
 
-float Shadow(float3 ro, float3 rd, float mint, float maxt)
-{
-    float t = mint;
-    float res = 1.0f;
-
-    int steps = _ShadowSteps;
-    const float thickness = -5.f;
-
-    for (int i = 0; i < steps && t < maxt; i++)
-    {
-        float3 p = ro + rd * t;
-        float terrainY = SampleTerrainHeight(p.xz);
-        float h = p.y - terrainY;
-
-        if (h < thickness)
-            return AMBIENT_INTENSITY;
-
-        res = min(res, _SunAngularRadius * (h - thickness) / max(t, 1e-3f));
-        float stepSize = clamp(t * 10.f, 0.05f, 20.f);
-        t += stepSize;
-    }
-
-    return saturate(res + AMBIENT_INTENSITY);
-    //return 1.f;
-}
 
 uint Hash(uint x)
 {
@@ -186,14 +158,69 @@ float3 SampleConeDirection(float3 axis, float cosMax, float2 u)
     return normalize(t * (cos(phi) * sinTheta) + b * (sin(phi) * sinTheta) + axis * cosTheta);
 }
 
-float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims, uint2 id, float2 uv, uint seedBase)
+bool Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terrainHeightAtHit, float maxT, float maxSteps, float distanceForHit)
+{
+    hitT = 0.0;
+    terrainHeightAtHit = 0.0;
+
+    for (int i = 0; i < maxSteps && hitT < maxT; i++)
+    {
+        float stepSize = clamp(hitT * 0.25f, 0.01f, 10.0f);
+        hitT += stepSize;
+        
+        float3 p = rOrigin + rDirection * hitT;
+
+        if (!IsInsideChunk(p.xz, float2(0.f, 0.f), float2(_ChunkSize, _ChunkSize)))   return false;
+      
+        float h = SampleTerrainHeight(p.xz);
+        float dist = p.y - h;
+
+        if (dist <= distanceForHit)
+        {
+            terrainHeightAtHit = p.y;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+
+float Shadow(float3 ro, float3 rd, float mint, float maxt)
+{
+    float t = mint;
+    float res = 1.0f;
+
+    int steps = _ShadowSteps;
+    const float thickness = -5.f;
+
+    for (int i = 0; i < steps && t < maxt; i++)
+    {
+        float3 p = ro + rd * t;
+        float terrainY = SampleTerrainHeight(p.xz);
+        float h = p.y - terrainY;
+
+        if (h < thickness)
+            return AMBIENT_INTENSITY;
+
+        res = min(res, _SunAngularRadius * (h - thickness) / max(t, 1e-3f));
+        float stepSize = clamp(t * 0.25f, 0.01f, 10.0f);
+        t += stepSize;
+    }
+  
+    return saturate(res + AMBIENT_INTENSITY);
+    return 1.f;
+}
+
+
+float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims, float2 uv, uint seedBase)
 {
     int sampleCount = _ShadowSamples;
     float visibility = 0.0f;
 
     rd = normalize(rd);
 
-    float3 rayStart = ro + normal * 0.05f;
+    float3 rayStart = ro;
     float sunHeight = saturate(rd.y);
     float cosMax = cos(max(radians(_SunAngularRadius), 1e-6f));
     float tmax = 1e30f; // "infinite"
@@ -204,40 +231,25 @@ float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims
         if (_UseBlueNoise)
         {
             u.x = BlueNoise::Sample(uv, dims, _FrameIndex);
-            u.y = BlueNoise::Sample(uv, dims, _FrameIndex + 32); // + float2(47.0 / dims.x, 367.0 / dims.y)
+            u.y = BlueNoise::Sample(uv, dims, _FrameIndex + 32);
         }
         else
         {
-            
-            uint seed = seedBase + j* 9781u;
+            uint seed = seedBase + j * 9781u;
             u = float2(Rand(seed), Rand(seed));
         }
         
         float3 lightDir = SampleConeDirection(rd, cosMax, u);
 
         float t = mint;
-        bool blocked = false;
-
-        for (int i = 0; i < _ShadowSteps && t < tmax; i++)
-        {
-            float3 p = rayStart + lightDir * t;
-            float terrainY = SampleTerrainHeight(p.xz);
-
-            if (p.y <= terrainY + 0.05f)
-            {
-                blocked = true;
-                break;
-            }
-
-            float stepSize = clamp(t * 10.f, 0.05f, 20.f);
-            t += stepSize;
-        }
+        float heightTerrain = 0.f;
+        
+        bool blocked = Raymarch(ro, lightDir, t, heightTerrain, tmax, _ShadowSteps, -5.f);
 
         visibility += blocked ? AMBIENT_INTENSITY : 1.0f;
     }
 
     return visibility;
-    //return u.x;
 }
 
 bool GetBoundsExit(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float tEnter, out float tExit)
@@ -281,14 +293,12 @@ bool TraverseHeightfieldMaxMip(
     float3 ro,
     float3 rd,
     out float hitT,
-    out float3 hitPos,
     out float hitHeight)
 {
     uint3 dimensions;
     _HeightMap.GetDimensions(0, dimensions.x, dimensions.y, dimensions.z);
 
     hitT = 0.0;
-    hitPos = 0.0;
     hitHeight = 0.0;
 
     float tEnter, tExitDomain;
@@ -298,7 +308,7 @@ bool TraverseHeightfieldMaxMip(
     float t = max(tEnter, 0.0);
     float tMax = min(tExitDomain, _MaxDistance);
 
-    int mip = max(0, (int) dimensions.z - 2);
+    int mip = max(dimensions.z-2, 0);
     float e = 1e-3f;
     for (int i = 0; i < _MaxStepsOptimized && t < tMax; i++)
     {
@@ -353,10 +363,9 @@ bool TraverseHeightfieldMaxMip(
                 float3 pf = ro + rd * tf;
                 float h = SampleTerrainHeight(pf.xz);
 
-                if (pf.y <= h)
+                if (pf.y - h <= _DistanceForHit)
                 {
                     hitT = tf;
-                    hitPos = pf;
                     hitHeight = h;
                     return true;
                 }
@@ -364,49 +373,20 @@ bool TraverseHeightfieldMaxMip(
                 tf += dt;
             }
 
-            t = tCellExit +e;
-            mip = 1;
+            t = tCellExit + e;
+            mip = max(0, (int) dimensions.z - 2);
+
         }
     }
 
     return false;
 }
 
-float Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terrainHeightAtHit)
+
+float3 GetNormal(float3 p, bool below, float t, uint resolution)
 {
-    float t = 0.0;
-    terrainHeightAtHit = 0.0;
-
-    for (int i = 0; i < _MaxSteps; i++)
-    {
-        float3 p = rOrigin + rDirection * t;
-
-        if (!IsInsideChunk(p.xz))
-            return false;
-
-        float h = SampleTerrainHeight(p.xz);
-        float dist = p.y - h;
-
-        if (abs(dist) < _DistanceForHit)
-        {
-            terrainHeightAtHit = h;
-            hitT = t;
-            return true;
-        }
-
-        float stepSize = clamp(abs(dist) * 0.25f, 0.02f, 20.0f);
-        t += stepSize;
-
-        if (t > _MaxDistance)
-            break;
-    }
-
-    return false;
-}
-
-float3 GetNormal(float3 p, bool below, float t)
-{
-    float e = 1e-2 * t; // tune based on your world scale
+    float texelWorldSize = _ChunkSize / resolution; // or pass this in
+    float e = texelWorldSize;
 
     float hL = SampleTerrainHeight(p.xz - float2(e, 0));
     float hR = SampleTerrainHeight(p.xz + float2(e, 0));
@@ -459,25 +439,27 @@ void Main (uint3 id : SV_DispatchThreadID)
     float elevation = 0;
     float3 col = 0;
     float shadow;
-    float hitT;
+    float hitT1 = 0.0f;
     float3 hitPos;
     float debugGrid = 0.f;
 
     bool hit = false;
     
-    if(_UseRaymarchOptimization)
+    if (_UseRaymarchOptimization)
     {
-        hit = TraverseHeightfieldMaxMip(cameraPos, rayDirection, hitT, hitPos, elevation);
+         hit = TraverseHeightfieldMaxMip(cameraPos, rayDirection, hitT1, elevation);
     }
     else
     {
-        hit = Raymarch(cameraPos, rayDirection, hitT, elevation);
+        hit = Raymarch(cameraPos, rayDirection, hitT1, elevation, _MaxDistance, _MaxSteps, _DistanceForHit);
     }
     
     if (hit)
     {
-        float3 p = cameraPos + rayDirection * hitT;
-        float3 n = GetNormal(p, belowTerrain, hitT);
+        uint2 heightmapDimensions;
+        _HeightMap.GetDimensions(heightmapDimensions.x, heightmapDimensions.y);
+        float3 p = cameraPos + rayDirection * hitT1;
+        float3 n = GetNormal(p, belowTerrain, hitT1, heightmapDimensions.x);
         float4 biomeValue = BiomeColor(elevation);
         
         PBRMaterial mat;
@@ -501,7 +483,7 @@ void Main (uint3 id : SV_DispatchThreadID)
         
         if (_UsePathtracedShadows)
         {
-            shadow = MarchedShadows(p + n * 0.02f, sunDir, 0.01f, n, dims, id.xy, uv,
+            shadow = MarchedShadows(p + n * 0.02f, sunDir, 0.01f, n, dims, uv,
               Hash(id.x + id.y * dims.x) + _FrameIndex);
             
             float2 tempShadows = _TemporalShadowPrev.Load(id);
@@ -521,8 +503,9 @@ void Main (uint3 id : SV_DispatchThreadID)
         
         //col.rgb = elevation / 100.0;
         col.rgb = diffuse + specular;
-        //col.rgb = shadow.xxx;
-        //col.rgb = mat.normal + 0.5f *0.5f;
+        //col.rgb = (mat.normal + 1.f) * 0.5;
+        //col.rgb = hitT/10000.f;
+        col.rgb *= shadow.xxx;
     }
     else
     {
