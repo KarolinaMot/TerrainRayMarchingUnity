@@ -335,9 +335,10 @@ bool TraverseHeightfieldMaxMipShadow(
         return false;
 
     float t = max(tEnter, 0.0);
-
-    //int mip = max(dimensions.z - 2, 0);
-    int mip = 0.f;
+    maxT = min(tExitDomain, maxT);
+    
+    int mip = max(dimensions.z - 2, 0);
+   // int mip = 0.f;
 
     float e = 0.5f;
     ////for (int i = 0; i < _MaxStepsOptimized && t < tMax; i++)
@@ -355,22 +356,22 @@ bool TraverseHeightfieldMaxMipShadow(
     float2 cellMin, cellMax;
     GetTexelWorldPos(mipSize.xy, cell, cellMin, cellMax);
 
-    //float tCellEnter, tCellExit;
-    //if (!GetBoundsExit(ro, rd, cellMin, cellMax, tCellEnter, tCellExit))
-    //    return false;
+    float tCellEnter, tCellExit;
+    if (!GetBoundsExit(ro, rd, cellMin, cellMax, tCellEnter, tCellExit))
+        return false;
     
-    //tCellEnter = max(tCellEnter, t);
-    //tCellExit = min(tCellExit, tExitDomain);
+    tCellEnter = max(tCellEnter, t);
+    tCellExit = min(tCellExit, maxT);
 
-    //if (tCellExit <= tCellEnter)
-    //{
-    //    t += e;
-    //    //continue;
-    //}
+    if (tCellExit <= tCellEnter)
+    {
+        t += e;
+        //continue;
+    }
 
-    //float y0 = ro.y + rd.y * tCellEnter;
-    //float y1 = ro.y + rd.y * tCellExit;
-    //float segMinY = min(y0, y1);
+    float y0 = ro.y + rd.y * tCellEnter;
+    float y1 = ro.y + rd.y * tCellExit;
+    float segMinY = min(y0, y1);
 
     //    if (mip > 0)
     //    {
@@ -385,15 +386,15 @@ bool TraverseHeightfieldMaxMipShadow(
     //    }
     //    else
     //    {
-            float tf = minT;
+            float dt = max((tCellEnter - tCellExit) / 8.0f, 1e-3f);
+            float tf = minT;    
 
-            while (tf <= maxT)
+            while (tf <= tCellExit)
             {
                 float3 pf = ro + rd * tf;
                 float h = SampleTerrainHeight(pf.xz);
-                h = pf.y - h;
 
-                if (h < distanceForHit)
+                if (pf.y - h <= distanceForHit)
                 {
                     hitT = tf;
                     hitHeight = h;
