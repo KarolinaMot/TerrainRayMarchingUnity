@@ -325,7 +325,8 @@ bool TraverseHeightfieldMaxMipShadow(
     out float hitHeight,
     float distanceForHit,
     float minT,
-    float maxT)
+    float maxT,
+    inout float softness)
 {
     uint3 dimensions;
     _HeightMap.GetDimensions(0, dimensions.x, dimensions.y, dimensions.z);
@@ -389,27 +390,32 @@ bool TraverseHeightfieldMaxMipShadow(
         }
         else
         {
-                float dt = max((tCellEnter - tCellExit) / 8.0f, 1e-3f);
-                float tf = minT;    
+            float dt = max((tCellExit - tCellEnter) / 8.0f, 1e-3f);
+            float tf = minT;    
 
-                while (tf <= tCellExit)
+            while (tf <= tCellExit)
+            {
+                float3 pf = ro + rd * tf;
+                float h = SampleTerrainHeight(pf.xz);
+
+                if (pf.y - h <= distanceForHit)
                 {
-                    float3 pf = ro + rd * tf;
-                    float h = SampleTerrainHeight(pf.xz);
-
-                    if (pf.y - h <= distanceForHit)
-                    {
-                        hitT = tf;
-                        hitHeight = h;
-                        return true;
-                    }
-        
-                    float stepSize = clamp(tf * 0.25f, 0.01f, 20.0f);
-                    tf += stepSize;
+                    hitT = tf;
+                    hitHeight = h;
+                    return true;
                 }
+                else
+                {
+                    softness = min(softness, _SunAngularRadius * 1.85f * (h - distanceForHit) / max(tf, 1e-3f));
+                }
+        
+                float stepSize = clamp(tf * 0.25f, 0.01f, 20.0f);
+                tf += stepSize;
+            }
 
-                t = tCellExit + e;
-                mip = max(0, (int) dimensions.z - 2);
+            t = tCellExit + e;
+            mip = max(0, (int) dimensions.z - 2);
+
         }
     }
 
@@ -439,10 +445,10 @@ float Shadow(float3 ro, float3 rd, float mint, float maxt)
     //}
     
     float hitT, elevation;
-    bool blocked = TraverseHeightfieldMaxMipShadow(ro, rd, hitT, elevation, _ShadowHitDistance, mint, maxt);
+    bool blocked = TraverseHeightfieldMaxMipShadow(ro, rd, hitT, elevation, _ShadowHitDistance, mint, maxt, res);
     
-    ///return saturate(res + AMBIENT_INTENSITY);
-    return (float) !blocked;
+    return blocked ? AMBIENT_INTENSITY : 1.f;
+    //return (float) !blocked;
     //return 1.f;
 }
 
