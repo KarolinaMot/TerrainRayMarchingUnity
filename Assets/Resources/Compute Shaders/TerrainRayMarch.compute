@@ -239,11 +239,11 @@ bool TraverseHeightfieldMaxMip(
         return false;
 
     float t = max(tEnter, 0.0);
-    float tMax = min(tExitDomain, _MaxDistance);
+    float tMax = tExitDomain;
 
     int mip = max(dimensions.z - 2, 0);
 
-    float e = 1e-3f;
+    float e = 0.5f;
     for (int i = 0; i < _MaxStepsOptimized && t < tMax; i++)
     {
         float3 p = ro + rd * t;
@@ -272,11 +272,9 @@ bool TraverseHeightfieldMaxMip(
             continue;
         }
 
-
         float y0 = ro.y + rd.y * tCellEnter;
         float y1 = ro.y + rd.y * tCellExit;
         float segMinY = min(y0, y1);
-
 
         if (mip > 0)
         {
@@ -317,6 +315,103 @@ bool TraverseHeightfieldMaxMip(
     return false;
 }
 
+bool TraverseHeightfieldMaxMipShadow(
+    float3 ro,
+    float3 rd,
+    out float hitT,
+    out float hitHeight,
+    float distanceForHit,
+    float minT,
+    float maxT)
+{
+    uint3 dimensions;
+    _HeightMap.GetDimensions(0, dimensions.x, dimensions.y, dimensions.z);
+
+    hitT = 0.0;
+    hitHeight = 0.0;
+
+    float tEnter, tExitDomain;
+    if (!GetBoundsExit(ro, rd, float2(0.0, 0.0), float2(_ChunkSize, _ChunkSize), tEnter, tExitDomain))
+        return false;
+
+    float t = max(tEnter, 0.0);
+
+    //int mip = max(dimensions.z - 2, 0);
+    int mip = 0.f;
+
+    float e = 0.5f;
+    ////for (int i = 0; i < _MaxStepsOptimized && t < tMax; i++)
+    ////{
+    float3 p = ro + rd * t;
+
+    uint3 mipSize;
+    _HeightMap.GetDimensions(mip, mipSize.x, mipSize.y, mipSize.z);
+
+    float2 uv = p.xz / _ChunkSize;
+    int2 cell = clamp((int2) floor(uv * mipSize.xy), int2(0, 0), int2(mipSize.xy) - 1);
+
+    float cellHeight = LoadMipHeight(cell, mip);
+
+    float2 cellMin, cellMax;
+    GetTexelWorldPos(mipSize.xy, cell, cellMin, cellMax);
+
+    //float tCellEnter, tCellExit;
+    //if (!GetBoundsExit(ro, rd, cellMin, cellMax, tCellEnter, tCellExit))
+    //    return false;
+    
+    //tCellEnter = max(tCellEnter, t);
+    //tCellExit = min(tCellExit, tExitDomain);
+
+    //if (tCellExit <= tCellEnter)
+    //{
+    //    t += e;
+    //    //continue;
+    //}
+
+    //float y0 = ro.y + rd.y * tCellEnter;
+    //float y1 = ro.y + rd.y * tCellExit;
+    //float segMinY = min(y0, y1);
+
+    //    if (mip > 0)
+    //    {
+    //        if (segMinY > cellHeight)
+    //        {
+    //            t = tCellExit + e;
+    //        }
+    //        else
+    //        {
+    //            mip--;
+    //        }
+    //    }
+    //    else
+    //    {
+            float tf = minT;
+
+            while (tf <= maxT)
+            {
+                float3 pf = ro + rd * tf;
+                float h = SampleTerrainHeight(pf.xz);
+                h = pf.y - h;
+
+                if (h < distanceForHit)
+                {
+                    hitT = tf;
+                    hitHeight = h;
+                    return true;
+                }
+        
+                float stepSize = clamp(tf * 0.25f, 0.01f, 10.0f);
+                tf += stepSize;
+            }
+
+            //t = tCellExit + e;
+            //mip = max(0, (int) dimensions.z - 2);
+    //    }
+    //}
+
+    return false;
+}
+
 
 float Shadow(float3 ro, float3 rd, float mint, float maxt)
 {
@@ -335,19 +430,16 @@ float Shadow(float3 ro, float3 rd, float mint, float maxt)
     //    if (h < thickness)
     //        return AMBIENT_INTENSITY;
 
-    //    //res = min(res, _SunAngularRadius * (h - thickness) / max(t, 1e-3f));
+    //    res = min(res, _SunAngularRadius * 1.85f * (h - thickness) / max(t, 1e-3f));
     //    float stepSize = clamp(t * 0.25f, 0.01f, 10.0f);
     //    t += stepSize;
     //}
     
     float hitT, elevation;
-    bool blocked =  TraverseHeightfieldMaxMip(ro, rd, hitT, elevation, thickness);
+    bool blocked =  TraverseHeightfieldMaxMipShadow(ro, rd, hitT, elevation, thickness, mint, maxt);
     
-    if(blocked)
-        return AMBIENT_INTENSITY;
-    else
-        return 1.f;
-    //return saturate(res + AMBIENT_INTENSITY);
+    ///return saturate(res + AMBIENT_INTENSITY);
+    return (float) !blocked;
     //return 1.f;
 }
 
@@ -382,8 +474,8 @@ float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims
         float t = mint;
         float heightTerrain = 0.f;
         
-        //bool blocked = Raymarch(ro, lightDir, t, heightTerrain, tmax, _ShadowSteps, -5.f);
-        bool blocked = TraverseHeightfieldMaxMip(ro,lightDir, t, heightTerrain, _DistanceForHit);
+        bool blocked = Raymarch(ro, lightDir, t, heightTerrain, tmax, _ShadowSteps, -5.f);
+        //bool blocked = TraverseHeightfieldMaxMip(ro,lightDir, t, heightTerrain, _DistanceForHit);
 
         visibility += blocked ? AMBIENT_INTENSITY : 1.0f;
     }
