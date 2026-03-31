@@ -291,7 +291,7 @@ MonoBehaviour:
   shadowSteps: 728
   shadowSamples: 1
   useBlueNoise: 0
-  pathTracedShadows: 1
+  pathTracedShadows: 0
   optimizeTracing: 1
 --- !u!114 &330585549
 MonoBehaviour:

@@ -185,33 +185,6 @@ bool Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terra
     return false;
 }
 
-
-float Shadow(float3 ro, float3 rd, float mint, float maxt)
-{
-    float t = mint;
-    float res = 1.0f;
-
-    int steps = _ShadowSteps;
-    const float thickness = -5.f;
-
-    for (int i = 0; i < steps && t < maxt; i++)
-    {
-        float3 p = ro + rd * t;
-        float terrainY = SampleTerrainHeight(p.xz);
-        float h = p.y - terrainY;
-
-        if (h < thickness)
-            return AMBIENT_INTENSITY;
-
-        res = min(res, _SunAngularRadius * (h - thickness) / max(t, 1e-3f));
-        float stepSize = clamp(t * 0.25f, 0.01f, 10.0f);
-        t += stepSize;
-    }
-  
-    return saturate(res + AMBIENT_INTENSITY);
-    return 1.f;
-}
-
 bool GetBoundsExit(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float tEnter, out float tExit)
 {
     tEnter = -1e38;
@@ -268,85 +241,115 @@ bool TraverseHeightfieldMaxMip(
     float t = max(tEnter, 0.0);
     float tMax = min(tExitDomain, _MaxDistance);
 
-    //int mip = max(dimensions.z - 2, 0);
-    int mip =0;
+    int mip = max(dimensions.z - 2, 0);
+
     float e = 1e-3f;
-    //for (int i = 0; i < _MaxStepsOptimized && t < tMax; i++)
-    //{
-    //    float3 p = ro + rd * t;
-
-    //    uint3 mipSize;
-        
-    //    _HeightMap.GetDimensions(mip, mipSize.x, mipSize.y, mipSize.z);
-
-    //    float2 uv = p.xz / _ChunkSize;
-    //    int2 cell = clamp((int2) floor(uv * mipSize.xy), int2(0, 0), int2(mipSize.xy) - 1);
-
-    //    float cellHeight = LoadMipHeight(cell, mip);
-
-    //    float2 cellMin, cellMax;
-    //    GetTexelWorldPos(mipSize.xy, cell, cellMin, cellMax);
-
-    //    float tCellEnter, tCellExit;
-    //    if (!GetBoundsExit(ro, rd, cellMin, cellMax, tCellEnter, tCellExit))
-    //        return false;
-
-    //    tCellEnter = max(tCellEnter, t);
-    //    tCellExit = min(tCellExit, tMax);
-
-    //    if (tCellExit <= tCellEnter)
-    //    {
-    //        t += e;
-    //        continue;
-    //    }
-
-    //    float y0 = ro.y + rd.y * tCellEnter;
-    //    float y1 = ro.y + rd.y * tCellExit;
-    //    float segMinY = min(y0, y1);
-
-    //    if (mip > 0)
-    //    {
-    //        if (segMinY > cellHeight)
-    //        {
-    //            t = tCellExit + e;
-    //        }
-    //        else
-    //        {
-    //            mip--;
-    //        }
-    //    }
-    //    else
-    //    
-    float tCellEnter = 0.f;
-    float tCellExit = length(_ChunkSize);
-    
-    float dt = max((tCellExit - tCellEnter) / 8.0f, 1e-3f);
-    float tf = tCellEnter;
-
-    for (int i = 0; i < _MaxStepsOptimized; i++)//(tf <= tCellExit)
+    for (int i = 0; i < _MaxStepsOptimized && t < tMax; i++)
     {
-        float3 pf = ro + rd * tf;
-        float h = SampleTerrainHeight(pf.xz);
+        float3 p = ro + rd * t;
 
-        if (pf.y - h <= distanceForHit)
+        uint3 mipSize;
+        _HeightMap.GetDimensions(mip, mipSize.x, mipSize.y, mipSize.z);
+
+        float2 uv = p.xz / _ChunkSize;
+        int2 cell = clamp((int2) floor(uv * mipSize.xy), int2(0, 0), int2(mipSize.xy) - 1);
+
+        float cellHeight = LoadMipHeight(cell, mip);
+
+        float2 cellMin, cellMax;
+        GetTexelWorldPos(mipSize.xy, cell, cellMin, cellMax);
+
+        float tCellEnter, tCellExit;
+        if (!GetBoundsExit(ro, rd, cellMin, cellMax, tCellEnter, tCellExit))
+            return false;
+
+        tCellEnter = max(tCellEnter, t);
+        tCellExit = min(tCellExit, tMax);
+
+        if (tCellExit <= tCellEnter)
         {
-            hitT = tf;
-            hitHeight = h;
-            return true;
+            t += e;
+            continue;
         }
 
-        tf += dt;
+
+        float y0 = ro.y + rd.y * tCellEnter;
+        float y1 = ro.y + rd.y * tCellExit;
+        float segMinY = min(y0, y1);
+
+
+        if (mip > 0)
+        {
+            if (segMinY > cellHeight)
+            {
+                t = tCellExit + e;
+            }
+            else
+            {
+                mip--;
+            }
+        }
+        else
+        {
+            float dt = max((tCellExit - tCellEnter) / 8.0f, 1e-3f);
+            float tf = tCellEnter;
+
+            while (tf <= tCellExit)
+            {
+                float3 pf = ro + rd * tf;
+                float h = SampleTerrainHeight(pf.xz);
+
+                if (pf.y - h <= _DistanceForHit)
+                {
+                    hitT = tf;
+                    hitHeight = h;
+                    return true;
+                }
+
+                tf += dt;
+            }
+
+            t = tCellExit + e;
+            mip = max(0, (int) dimensions.z - 2);
+        }
     }
-
-    t = tCellExit + e;
-    mip = max(0, (int) dimensions.z - 2);
-
-        //}
-   // }
 
     return false;
 }
 
+
+float Shadow(float3 ro, float3 rd, float mint, float maxt)
+{
+    float t = mint;
+    float res = 1.0f;
+
+    int steps = _ShadowSteps;
+    const float thickness = -5.f;
+
+    //for (int i = 0; i < steps && t < maxt; i++)
+    //{
+    //    float3 p = ro + rd * t;
+    //    float terrainY = SampleTerrainHeight(p.xz);
+    //    float h = p.y - terrainY;
+
+    //    if (h < thickness)
+    //        return AMBIENT_INTENSITY;
+
+    //    //res = min(res, _SunAngularRadius * (h - thickness) / max(t, 1e-3f));
+    //    float stepSize = clamp(t * 0.25f, 0.01f, 10.0f);
+    //    t += stepSize;
+    //}
+    
+    float hitT, elevation;
+    bool blocked =  TraverseHeightfieldMaxMip(ro, rd, hitT, elevation, thickness);
+    
+    if(blocked)
+        return AMBIENT_INTENSITY;
+    else
+        return 1.f;
+    //return saturate(res + AMBIENT_INTENSITY);
+    //return 1.f;
+}
 
 float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims, float2 uv, uint seedBase)
 {
@@ -512,7 +515,7 @@ void Main (uint3 id : SV_DispatchThreadID)
         col.rgb = diffuse + specular;
         //col.rgb = (mat.normal + 1.f) * 0.5;
         //col.rgb = hitT/10000.f;
-        //col.rgb = shadow.xxx;
+        col.rgb = shadow.xxx;
     }
     else
     {
