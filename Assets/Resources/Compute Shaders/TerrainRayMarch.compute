@@ -35,7 +35,9 @@ float _OceanDepth;
 float _Metallic;
 float _SunAngularRadius;
 float _ShadowSteps;
+float _ShadowHitDistance;
 uint _ShadowSamples;
+float _ShdowEpsilon;
 uint _UseBlueNoise;
 uint _UsePathtracedShadows;
 uint _UseRaymarchOptimization;
@@ -310,6 +312,7 @@ bool TraverseHeightfieldMaxMip(
             t = tCellExit + e;
             mip = max(0, (int) dimensions.z - 2);
         }
+
     }
 
     return false;
@@ -340,75 +343,75 @@ bool TraverseHeightfieldMaxMipShadow(
     int mip = max(dimensions.z - 2, 0);
    // int mip = 0.f;
 
-    float e = 0.5f;
-    ////for (int i = 0; i < _MaxStepsOptimized && t < tMax; i++)
-    ////{
-    float3 p = ro + rd * t;
-
-    uint3 mipSize;
-    _HeightMap.GetDimensions(mip, mipSize.x, mipSize.y, mipSize.z);
-
-    float2 uv = p.xz / _ChunkSize;
-    int2 cell = clamp((int2) floor(uv * mipSize.xy), int2(0, 0), int2(mipSize.xy) - 1);
-
-    float cellHeight = LoadMipHeight(cell, mip);
-
-    float2 cellMin, cellMax;
-    GetTexelWorldPos(mipSize.xy, cell, cellMin, cellMax);
-
-    float tCellEnter, tCellExit;
-    if (!GetBoundsExit(ro, rd, cellMin, cellMax, tCellEnter, tCellExit))
-        return false;
-    
-    tCellEnter = max(tCellEnter, t);
-    tCellExit = min(tCellExit, maxT);
-
-    if (tCellExit <= tCellEnter)
+    float e = _ShdowEpsilon;
+    for (int i = 0; i < _ShadowSteps && t < maxT; i++)
     {
-        t += e;
-        //continue;
-    }
+        float3 p = ro + rd * t;
 
-    float y0 = ro.y + rd.y * tCellEnter;
-    float y1 = ro.y + rd.y * tCellExit;
-    float segMinY = min(y0, y1);
+        uint3 mipSize;
+        _HeightMap.GetDimensions(mip, mipSize.x, mipSize.y, mipSize.z);
 
-    //    if (mip > 0)
-    //    {
-    //        if (segMinY > cellHeight)
-    //        {
-    //            t = tCellExit + e;
-    //        }
-    //        else
-    //        {
-    //            mip--;
-    //        }
-    //    }
-    //    else
-    //    {
-            float dt = max((tCellEnter - tCellExit) / 8.0f, 1e-3f);
-            float tf = minT;    
+        float2 uv = p.xz / _ChunkSize;
+        int2 cell = clamp((int2) floor(uv * mipSize.xy), int2(0, 0), int2(mipSize.xy) - 1);
 
-            while (tf <= tCellExit)
+        float cellHeight = LoadMipHeight(cell, mip);
+
+        float2 cellMin, cellMax;
+        GetTexelWorldPos(mipSize.xy, cell, cellMin, cellMax);
+
+        float tCellEnter, tCellExit;
+        if (!GetBoundsExit(ro, rd, cellMin, cellMax, tCellEnter, tCellExit))
+            return false;
+    
+        tCellEnter = max(tCellEnter, t);
+        tCellExit = min(tCellExit, maxT);
+
+        if (tCellExit <= tCellEnter)
+        {
+            t += e;
+            continue;
+        }
+
+        float y0 = ro.y + rd.y * tCellEnter;
+        float y1 = ro.y + rd.y * tCellExit;
+        float segMinY = min(y0, y1);
+
+        if (mip > 0)
+        {
+            if (segMinY > cellHeight)
             {
-                float3 pf = ro + rd * tf;
-                float h = SampleTerrainHeight(pf.xz);
-
-                if (pf.y - h <= distanceForHit)
-                {
-                    hitT = tf;
-                    hitHeight = h;
-                    return true;
-                }
-        
-                float stepSize = clamp(tf * 0.25f, 0.01f, 10.0f);
-                tf += stepSize;
+                t = tCellExit + e;
             }
+            else
+            {
+                mip--;
+            }
+        }
+        else
+        {
+                float dt = max((tCellEnter - tCellExit) / 8.0f, 1e-3f);
+                float tf = minT;    
 
-            //t = tCellExit + e;
-            //mip = max(0, (int) dimensions.z - 2);
-    //    }
-    //}
+                while (tf <= tCellExit)
+                {
+                    float3 pf = ro + rd * tf;
+                    float h = SampleTerrainHeight(pf.xz);
+
+                    if (pf.y - h <= distanceForHit)
+                    {
+                        hitT = tf;
+                        hitHeight = h;
+                        return true;
+                    }
+        
+                    float stepSize = clamp(tf * 0.25f, 0.01f, 20.0f);
+                    tf += stepSize;
+                }
+
+                t = tCellExit + e;
+                mip = max(0, (int) dimensions.z - 2);
+        }
+    }
 
     return false;
 }
@@ -420,7 +423,6 @@ float Shadow(float3 ro, float3 rd, float mint, float maxt)
     float res = 1.0f;
 
     int steps = _ShadowSteps;
-    const float thickness = -5.f;
 
     //for (int i = 0; i < steps && t < maxt; i++)
     //{
@@ -437,7 +439,7 @@ float Shadow(float3 ro, float3 rd, float mint, float maxt)
     //}
     
     float hitT, elevation;
-    bool blocked =  TraverseHeightfieldMaxMipShadow(ro, rd, hitT, elevation, thickness, mint, maxt);
+    bool blocked = TraverseHeightfieldMaxMipShadow(ro, rd, hitT, elevation, _ShadowHitDistance, mint, maxt);
     
     ///return saturate(res + AMBIENT_INTENSITY);
     return (float) !blocked;
@@ -475,7 +477,7 @@ float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims
         float t = mint;
         float heightTerrain = 0.f;
         
-        bool blocked = Raymarch(ro, lightDir, t, heightTerrain, tmax, _ShadowSteps, -5.f);
+        bool blocked = Raymarch(ro, lightDir, t, heightTerrain, tmax, 780, -5.f);
         //bool blocked = TraverseHeightfieldMaxMip(ro,lightDir, t, heightTerrain, _DistanceForHit);
 
         visibility += blocked ? AMBIENT_INTENSITY : 1.0f;
@@ -601,14 +603,14 @@ void Main (uint3 id : SV_DispatchThreadID)
         }
         else
         {
-            shadow = Shadow(p + n * 0.02f, sunDir, 0.01f, _MaxDistance);
+            shadow = Shadow(p + n *1.5f, sunDir, 1.5f, _MaxDistance);
         }
         
         //col.rgb = elevation / 100.0;
         col.rgb = diffuse + specular;
         //col.rgb = (mat.normal + 1.f) * 0.5;
         //col.rgb = hitT/10000.f;
-        col.rgb = shadow.xxx;
+        col.rgb *= shadow.xxx;
     }
     else
     {

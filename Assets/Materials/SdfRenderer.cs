@@ -39,6 +39,8 @@ public class SdfRenderer : MonoBehaviour
     public float sunAngularRadius = 3;
     public float shadowSteps = 1024;
     public int shadowSamples = 16;
+    public float shdowEpsilon = 35f;
+    public float shadowHitDistance = -5f;
     public bool useBlueNoise = true;
     public bool pathTracedShadows = true;
     public bool optimizeTracing = true;
@@ -213,8 +215,9 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeVectorParam(marchCS, "_SunDirectionIntensity", sunDirIntensity);
         cmd.SetComputeVectorParam(marchCS, "_SunColor", sunColor);
         cmd.SetComputeFloatParam(marchCS, "_SunAngularRadius", sunAngularRadius);
+        cmd.SetComputeFloatParam(marchCS, "_ShdowEpsilon", shdowEpsilon);
         cmd.SetComputeFloatParam(marchCS, "_ChunkSize", noiseGen.chunkSize);
-        cmd.SetComputeFloatParam(marchCS, "_ChunkSize", noiseGen.chunkSize);
+        cmd.SetComputeFloatParam(marchCS, "_ShadowHitDistance", shadowHitDistance);
         cmd.SetComputeVectorParam(marchCS, "_ChunkCoord", new Vector2(0f,0f));
         cmd.SetComputeFloatParam(marchCS, "_ShadowSteps", shadowSteps);
         cmd.SetComputeIntParam(marchCS, "_ShadowSamples", (int)shadowSamples);
