@@ -448,7 +448,7 @@ float Shadow(float3 ro, float3 rd, float mint)
         bool inBound = GetBoundsExit(ro, rd, float2(0.0, 0.0), float2(_ChunkSize, _ChunkSize), tEnter, tExitDomain);
 
         float maxt = tExitDomain;
-        float maxStep = maxt * 1e-3f; // allow crossing 2% of total range in one step
+        float maxStep = maxt * 9e-4f; // allow crossing 2% of total range in one step
         hitT = _ShdowEpsilon;
         
         for (int i = 0; i < steps && hitT < maxt; i++)
@@ -463,7 +463,7 @@ float Shadow(float3 ro, float3 rd, float mint)
             }
             
 
-            float stepSize = clamp(h / abs(rd.y + 0.001f) * 0.5f, 0.005f, maxStep);
+            float stepSize = clamp(h / abs(rd.y + 0.001f) * 0.5f, 60.f, maxStep);
             hitT += stepSize;
 
         }
@@ -658,7 +658,7 @@ void Main (uint3 id : SV_DispatchThreadID)
         //col.rgb = elevation / 100.0;
        // col.rgb = mat.baseColor;
          col.rgb = diffuse;
-         //col.rgb *= shadow;
+         col.rgb *= shadow;
         //col.rgb = (mat.normal + 1.f) * 0.5;
     }
     else
