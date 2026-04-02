@@ -160,33 +160,6 @@ float3 SampleConeDirection(float3 axis, float cosMax, float2 u)
     return normalize(t * (cos(phi) * sinTheta) + b * (sin(phi) * sinTheta) + axis * cosTheta);
 }
 
-bool Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terrainHeightAtHit, float maxT, float maxSteps, float distanceForHit)
-{
-    hitT = 0.0;
-    terrainHeightAtHit = 0.0;
-
-    for (int i = 0; i < maxSteps && hitT < maxT; i++)
-    {
-        float stepSize = clamp(hitT * 0.25f, 0.01f, 10.0f);
-        hitT += stepSize;
-        
-        float3 p = rOrigin + rDirection * hitT;
-
-        if (!IsInsideChunk(p.xz, float2(0.f, 0.f), float2(_ChunkSize, _ChunkSize)))   return false;
-      
-        float h = SampleTerrainHeight(p.xz);
-        float dist = p.y - h;
-
-        if (dist <= distanceForHit)
-        {
-            terrainHeightAtHit = p.y;
-            return true;
-        }
-    }
-
-    return false;
-}
-
 bool GetBoundsExit(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float tEnter, out float tExit)
 {
     tEnter = -1e38;
@@ -209,6 +182,82 @@ bool GetBoundsExit(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float
 
     return true;
 }
+
+
+bool Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terrainHeightAtHit, float maxT, float maxSteps, float distanceForHit)
+{
+    hitT = 0.0;
+    terrainHeightAtHit = 0.0;
+    
+    float tEnter, tExitDomain;
+    if (!GetBoundsExit(rOrigin, rDirection, float2(0.0, 0.0), float2(_ChunkSize, _ChunkSize), tEnter, tExitDomain))
+        return false;
+
+    maxT = tExitDomain;
+    float maxStep = maxT * 1e-3f; // allow crossing 2% of total range in one step
+    
+    for (int i = 0; i < maxSteps && hitT < maxT; i++)
+    {
+        float3 p = rOrigin + rDirection * hitT;
+        float terrainY = SampleTerrainHeight(p.xz);
+        float h = p.y - terrainY;
+
+        if (h < distanceForHit)
+        {
+            terrainHeightAtHit = p.y;
+            return true;
+        }
+            
+
+        float stepSize = clamp(h / abs(rDirection.y + 0.001f) * 0.5f, 0.001f, maxStep);
+        hitT += stepSize;
+
+    }
+
+    return false;
+    
+    //hitT = 0.0;
+    
+    //// Phase 1: coarse march to find crossing interval
+    //float coarseStep = maxT / (maxSteps * 0.25f);
+    //float prevT = 0.0;
+    //bool found = false;
+    
+    //for (int i = 0; i < maxSteps * 0.25 && hitT < maxT; i++)
+    //{
+    //    float3 p = rOrigin + rDirection * hitT;
+    //    float h = p.y - SampleTerrainHeight(p.xz);
+        
+    //    if (h < distanceForHit)
+    //    {
+    //        found = true;
+    //        break;
+    //    }
+    //    prevT = hitT;
+    //    hitT += max(h / abs(rDirection.y + 0.001f), coarseStep);
+    //}
+    
+    //if (!found)
+    //    return false;
+    
+    //// Phase 2: binary search refinement in [prevT, hitT]
+    //for (int j = 0; j < 8; j++)
+    //{
+    //    float midT = (prevT + hitT) * 0.5f;
+    //    float3 p = rOrigin + rDirection * midT;
+    //    float h = p.y - SampleTerrainHeight(p.xz);
+        
+    //    if (h < distanceForHit)
+    //        hitT = midT;
+    //    else
+    //        prevT = midT;
+    //}
+    
+    //float3 finalP = rOrigin + rDirection * hitT;
+    //terrainHeightAtHit = SampleTerrainHeight(finalP.xz);
+    //return true;
+}
+
 
 
 float LoadMipHeight(int2 texel, int mip)
@@ -625,10 +674,10 @@ void Main (uint3 id : SV_DispatchThreadID)
         }
         
         //col.rgb = elevation / 100.0;
-        col.rgb = diffuse + specular;
+       // col.rgb = mat.baseColor;
+         col.rgb = diffuse +specular;
+         col.rgb *= shadow;
         //col.rgb = (mat.normal + 1.f) * 0.5;
-        //col.rgb = hitT/10000.f;
-        col.rgb *= shadow.xxx;
     }
     else
     {
