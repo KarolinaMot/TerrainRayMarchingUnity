@@ -15,7 +15,6 @@ public class SdfRenderer : MonoBehaviour
     [Header("Ray-marching")]
     public int maxSteps = 100;
     public int maxStepsOptimized = 100;
-    public int maxDistance = 100;
     public float distanceForHit = 0.001f;
     [Space(10)]
 
@@ -186,7 +185,6 @@ public class SdfRenderer : MonoBehaviour
         }
 
         cmd.SetComputeIntParam(marchCS, "_MaxSteps", maxSteps);
-        cmd.SetComputeIntParam(marchCS, "_MaxDistance", maxDistance);
         cmd.SetComputeFloatParam(marchCS, "_DistanceForHit", distanceForHit);
         cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMap", noiseGen.heightmap);
 
