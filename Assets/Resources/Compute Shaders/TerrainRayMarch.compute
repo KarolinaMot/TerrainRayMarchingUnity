@@ -342,7 +342,6 @@ bool TraverseHeightfieldMaxMipShadow(
     maxT = min(tExitDomain, maxT);
     
     int mip = max(dimensions.z - 2, 0);
-   // int mip = 0.f;
 
     float e = _ShdowEpsilon;
     for (int i = 0; i < _ShadowSteps && t < maxT; i++)
@@ -390,7 +389,8 @@ bool TraverseHeightfieldMaxMipShadow(
         }
         else
         {
-            float dt = max((tCellExit - tCellEnter) / 8.0f, 1e-3f);
+            //float dt = max((tCellExit - tCellEnter) / 10.0f, 1e-4f);
+            float dt = clamp(t * 0.25f, 0.01f, 10.0f);
             float tf = minT;    
 
             while (tf <= tCellExit)
@@ -430,22 +430,27 @@ float Shadow(float3 ro, float3 rd, float mint, float maxt)
 
     int steps = _ShadowSteps;
 
-    //for (int i = 0; i < steps && t < maxt; i++)
-    //{
-    //    float3 p = ro + rd * t;
-    //    float terrainY = SampleTerrainHeight(p.xz);
-    //    float h = p.y - terrainY;
-
-    //    if (h < thickness)
-    //        return AMBIENT_INTENSITY;
-
-    //    res = min(res, _SunAngularRadius * 1.85f * (h - thickness) / max(t, 1e-3f));
-    //    float stepSize = clamp(t * 0.25f, 0.01f, 10.0f);
-    //    t += stepSize;
-    //}
-    
     float hitT, elevation;
-    bool blocked = TraverseHeightfieldMaxMipShadow(ro, rd, hitT, elevation, _ShadowHitDistance, mint, maxt, res);
+    bool blocked = false;
+    
+    if(_UseRaymarchOptimization)
+        blocked = TraverseHeightfieldMaxMipShadow(ro, rd, hitT, elevation, _ShadowHitDistance, mint, maxt, res);
+    else
+    {
+        for (int i = 0; i < steps && t < maxt; i++)
+        {
+            float3 p = ro + rd * t;
+            float terrainY = SampleTerrainHeight(p.xz);
+            float h = p.y - terrainY;
+
+            if (h < _ShadowHitDistance)
+                blocked = true;
+
+            res = min(res, _SunAngularRadius * 1.85f * (h - _ShadowHitDistance) / max(t, 1e-3f));
+            float stepSize = clamp(t * 0.25f, 0.01f, 10.0f);
+            t += stepSize;
+        }
+    }
     
     return blocked ? AMBIENT_INTENSITY : 1.f;
     //return (float) !blocked;
@@ -482,9 +487,15 @@ float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims
 
         float t = mint;
         float heightTerrain = 0.f;
+        bool blocked = false;
         
-        bool blocked = Raymarch(ro, lightDir, t, heightTerrain, tmax, 780, -5.f);
-        //bool blocked = TraverseHeightfieldMaxMip(ro,lightDir, t, heightTerrain, _DistanceForHit);
+        float res = 1.f;
+        
+        if (_UseRaymarchOptimization)
+            blocked = TraverseHeightfieldMaxMipShadow(ro, lightDir, t, heightTerrain, _ShadowHitDistance, mint, tmax, res);
+        else
+            blocked = Raymarch(ro, lightDir, t, heightTerrain, tmax, 780, -5.f);
+
 
         visibility += blocked ? AMBIENT_INTENSITY : 1.0f;
     }
@@ -603,7 +614,8 @@ void Main (uint3 id : SV_DispatchThreadID)
             float newShadows = oldShadows + shadow;
             float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
             float shadowRes = newShadows / max(1.f, newShadowSampleNum);
-            shadow = shadow;
+            shadow = newShadows / newShadowSampleNum;
+            //shadow = shadow;
             
             _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
         }

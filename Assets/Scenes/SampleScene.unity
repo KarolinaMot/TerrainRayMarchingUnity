@@ -290,10 +290,10 @@ MonoBehaviour:
   sunAngularRadius: 0.55
   shadowSteps: 250
   shadowSamples: 1
-  shdowEpsilon: 33
-  shadowHitDistance: 0.76
+  shdowEpsilon: 38
+  shadowHitDistance: -2.18
   useBlueNoise: 0
-  pathTracedShadows: 0
+  pathTracedShadows: 1
   optimizeTracing: 1
 --- !u!114 &330585549
 MonoBehaviour:
