@@ -274,7 +274,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   maxSteps: 4096
   maxStepsOptimized: 601
-  distanceForHit: 0.1
+  distanceForHit: 0.00001
   grassColor: {r: 0.18349235, g: 0.4339623, b: 0.104396574, a: 0}
   waterColor: {r: 0.15744035, g: 0.2886758, b: 0.5471698, a: 0}
   snowColor: {r: 1, g: 1, b: 1, a: 0}
@@ -286,14 +286,15 @@ MonoBehaviour:
   rockLevel: 299.8
   snowLevel: 745.9
   oceanDepth: 9.28
-  sunAngularRadius: -0.14
-  shadowSteps: 2809
+  sunAngularRadius: 0.16
+  shadowSteps: 2776
+  shadowStepsOptimized: 225
   shadowSamples: 1
-  shdowEpsilon: 0.93
-  shadowHitDistance: -5.32
+  shdowEpsilon: 0.92
+  shadowHitDistance: 0
   useBlueNoise: 0
-  pathTracedShadows: 0
-  optimizeTracing: 0
+  pathTracedShadows: 1
+  optimizeTracing: 1
 --- !u!114 &330585549
 MonoBehaviour:
   m_ObjectHideFlags: 0

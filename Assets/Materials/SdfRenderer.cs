@@ -37,6 +37,7 @@ public class SdfRenderer : MonoBehaviour
     [Header("Terrain shading")]
     public float sunAngularRadius = 3;
     public float shadowSteps = 1024;
+    public float shadowStepsOptimized = 225;
     public int shadowSamples = 16;
     public float shdowEpsilon = 35f;
     public float shadowHitDistance = -5f;
@@ -218,6 +219,7 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeFloatParam(marchCS, "_ShadowHitDistance", shadowHitDistance);
         cmd.SetComputeVectorParam(marchCS, "_ChunkCoord", new Vector2(0f,0f));
         cmd.SetComputeFloatParam(marchCS, "_ShadowSteps", shadowSteps);
+        cmd.SetComputeFloatParam(marchCS, "_ShadowStepsOptimized", shadowStepsOptimized);
         cmd.SetComputeIntParam(marchCS, "_ShadowSamples", (int)shadowSamples);
         cmd.SetComputeIntParam(marchCS, "_UseBlueNoise", useBlueNoise ? 1 : 0);
         cmd.SetComputeIntParam(marchCS, "_UsePathtracedShadows", pathTracedShadows ? 1 : 0);
