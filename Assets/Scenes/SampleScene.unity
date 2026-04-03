@@ -286,8 +286,8 @@ MonoBehaviour:
   rockLevel: 299.8
   snowLevel: 745.9
   oceanDepth: 9.28
-  sunAngularRadius: 0.16
-  shadowSteps: 2776
+  sunAngularRadius: 0.93
+  shadowSteps: 4096
   shadowStepsOptimized: 225
   shadowSamples: 1
   shdowEpsilon: 0.92
