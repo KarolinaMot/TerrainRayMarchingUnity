@@ -348,7 +348,8 @@ bool TraverseHeightfieldMaxMipShadow(
     float maxT = tExitDomain;
     
     int mip = max(dimensions.z - 2, 0);
-
+    softness = 0.f;
+    
     float e = 40.f;
     for (int i = 0; i < _ShadowStepsOptimized && t < maxT; i++)
     {
@@ -405,21 +406,20 @@ bool TraverseHeightfieldMaxMipShadow(
             {
                 float3 pf = ro + rd * tf;
                 float h = SampleTerrainHeight(pf.xz);
+                float gap = pf.y - h;
+                float horizontalDist = tf * length(rd.xz); // horizontal distance along ray
+                softness = min(softness, degrees(_SunAngularRadius) * (gap - _ShadowHitDistance) / max(tf, 1e-3f));
 
-                if (pf.y - h <= distanceForHit * t)
+                if (gap <= distanceForHit * t)
                 {
                     hitT = tf;
                     hitHeight = h;
                     return true;
                 }
-                else
-                {
-                    float gap = pf.y - h;
-                    softness = min(softness, _SunAngularRadius * 1.85f * (gap - distanceForHit) / max(tf, 1e-3f));
-                }
-        
+
+
                 float minStep = _ChunkSize / (_ShadowSteps * 4.0f);
-                float stepSize = clamp(h / abs(rd.y + 0.001f) * 0.5f, minStep, maxStep);
+                float stepSize = clamp(gap * 0.5f / max(abs(rd.y), 0.01f), minStep, maxStep);
                 tf += stepSize;
             }
 
@@ -436,15 +436,18 @@ bool TraverseHeightfieldMaxMipShadow(
 float Shadow(float3 ro, float3 rd, float mint)
 {
     float t = mint;
-    float res = 1.0f;
-
+    float res = degrees(_SunAngularRadius);
+    
     int steps = _ShadowSteps;
 
     float hitT, elevation;
     bool blocked = false;
     
     if(_UseRaymarchOptimization)
+    {
         blocked = TraverseHeightfieldMaxMipShadow(ro, rd, hitT, elevation, _ShadowHitDistance, mint, res);
+        res = saturate(res + AMBIENT_INTENSITY) + AMBIENT_INTENSITY;
+    }
     else
     {        
         float tEnter, tExitDomain;
@@ -462,17 +465,23 @@ float Shadow(float3 ro, float3 rd, float mint)
 
             if (h < _ShadowHitDistance)
             {
-                blocked =  true;
+                return AMBIENT_INTENSITY;
             }
             
-            res = min(res, _SunAngularRadius * 1.85f * (h - _ShadowHitDistance) / max(t, 1e-3f));
+            res = min(res, degrees(_SunAngularRadius) * (h - _ShadowHitDistance) / max(hitT, 1e-3f));
             float stepSize = clamp(h / abs(rd.y + 0.001f) * 0.5f, 60.f, maxStep);
             hitT += stepSize;
 
         }
+        res = saturate(res + AMBIENT_INTENSITY);
+
     }
     
-    return blocked ? AMBIENT_INTENSITY : 1.f;
+    //if(blocked)
+    //    return AMBIENT_INTENSITY;
+    
+    return res;
+  //  return blocked ? AMBIENT_INTENSITY : 1.f;
 }
 
 float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims, float2 uv, uint seedBase)
