@@ -653,7 +653,7 @@ void Main (uint3 id : SV_DispatchThreadID)
         
         //col.rgb = elevation / 100.0;
        // col.rgb = mat.baseColor;
-         col.rgb = diffuse;
+         col.rgb = diffuse + specular;
          col.rgb *= shadow;
         //col.rgb = (mat.normal + 1.f) * 0.5;
     }
