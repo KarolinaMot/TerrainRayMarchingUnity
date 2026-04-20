@@ -208,7 +208,7 @@ bool Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terra
             return true;
         }
             
-        hitT += max(abs(h) * 0.01, 0.001f);
+        hitT += max(abs(h) * 0.2, 0.01);
     }
 
     return false;
@@ -233,6 +233,55 @@ uint2 GetMipSize(int2 baseSize, int mip)
     return max(uint2(1u, 1u), baseSize >> mip);
 }
 
+//Vec2f rayDirection = { ..., ... }; // assumed normalized
+//Vec2f rayOrigin = { ..., ... };
+//Vec2f gridResolution = { ..., ... };
+//Vec2f cellDimension = (gridMax - gridMin) / gridResolution;
+//Vec2f deltaT, nextCrossingT;
+//Vec2f rayOrigGrid = rayOrigin - gridMin;
+//
+//if (rayDirection[0] < 0) {
+//    deltaT[0] = -gridDimension[0] /RayDirection[0];
+//    t_x = (floor(rayOrigGrid[0] / cellDimension[0]) * cellDimension[0] - rayOrigGrid[0]) / rayDirection[0];
+//}
+//else {
+//    deltaT[0] = gridDimension[0] /RayDirection[0];
+//    t_x = ((floor(rayOrigGrid[0] / cellDimension[0]) + 1) * cellDimension[0] - rayOrigGrid[0]) / rayDirection[0];
+//}
+//if (rayDirection[1] < 0) {
+//    deltaT[1] = -gridDimension[1] / RayDirection[1];
+//    t_y = (floor(rayOrigGrid[1] / cellDimension[1]) * cellDimension[1] - rayOrigGrid[1]) / rayDirection[1];
+//}
+//else {
+//    deltaT[1] = gridDimension[1] / RayDirection[1];
+//    t_y = ((floor(rayOrigGrid[1] / cellDimension[1]) + 1) * cellDimension[1]  - rayOrigGrid[1]) / rayDirection[1];
+//}
+//
+//float t = 0;
+//Vec2i cellIndex = { .., ... }; // origin of the ray (cell index)
+//while (1) {
+//    if (t_x < t_y) {
+//        t =t_x; // current t, next intersection with cell along ray
+//        t_x+=deltaT[0]; // increment, next crossing along x
+//        if (rayDirection[0] < 0)
+//            cellIndex[0] -= 1;
+//        else
+//            cellIndex[0] += 1;
+//    }
+//    else {
+//        t = t_y;
+//        t_y += deltaT[1]; // increment, next crossing along y
+//        if (rayDirection[1] < 0)
+//            cellIndex[1] -= 1;
+//        else
+//            cellIndex[1] += 1;
+//    }
+//	// if some condition is met break from the loop
+//    if (cellIndex[0] < 0 || cellIndex[1] < 0 || 
+//        cellIndex[0] > gridDimension[0] - 1 || cellIndex[1] > gridDimension[1] - 1) 
+//        break;
+//    }
+
 bool TraverseHeightfieldMaxMip(
     float3 ro,
     float3 rd,
@@ -246,23 +295,50 @@ bool TraverseHeightfieldMaxMip(
     hitT = 0.0;
     hitHeight = 0.0;
 
-    float tEnter, tExitDomain;
-    if (!GetBoundsExit(ro, rd, float2(0.0, 0.0), float2(_ChunkSize, _ChunkSize), tEnter, tExitDomain))
-        return false;
+    //float tEnter, tExitDomain;
+    //if (!GetBoundsExit(ro, rd, float2(0.0, 0.0), float2(_ChunkSize, _ChunkSize), tEnter, tExitDomain))
+    //    return false;
 
-    float t = max(tEnter, 0.0);
-    float tMax = tExitDomain;
+    //float t = max(tEnter, 0.0);
+    //float tMax = tExitDomain;
 
+
+    //float e = 9e-3f;
+    
     int mip = max(dimensions.z - 2, 0);
+    float2 deltaT;
+    float t_x, t_y;
+    float cellDimension = 1 / _ChunkSize;
+    
+    if (rd.x < 0)
+    {
+        deltaT.x = -_ChunkSize / rd.x;
+        t_x = (floor(ro.x / cellDimension) * cellDimension - ro.x) / rd.x;
+    }
+    else
+    {
+        deltaT.x = _ChunkSize / rd.x;
+        t_x = ((floor(ro.x / cellDimension) + 1) * cellDimension - ro.x) / rd.x;
+    }
+    if (rd[1] < 0)
+    {
+        deltaT.y = -_ChunkSize / rd.y;
+        t_y = (floor(ro.y / cellDimension) * cellDimension - ro.y) / rd.y;
+    }
+    else
+    {
+        deltaT.y = _ChunkSize / rd.y;
+        t_y = ((floor(ro.y / cellDimension) + 1) * cellDimension - ro.y) / rd.y;
+    }
 
-    float e = 9e-3f;
-    for (int i = 0; i < _MaxStepsOptimized && t < tMax; i++)
+    for (int i = 0; i < _MaxStepsOptimized &&; i++)
     {
         float3 p = ro + rd * t;
 
         uint2 mipSize = GetMipSize(dimensions.xy, mip);
-
         float2 uv = p.xz / _ChunkSize;
+        
+
         int2 cell = clamp((int2) floor(uv * mipSize.xy), int2(0, 0), int2(mipSize.xy) - 1);
 
         float cellHeight = LoadMipHeight(cell, mip);
@@ -306,18 +382,18 @@ bool TraverseHeightfieldMaxMip(
             {
                 float3 pf = ro + rd * tf;
                 float h = SampleTerrainHeight(pf.xz);
-
-                if (pf.y - h <= _DistanceForHit)
+                float dist = pf.y - h;
+                
+                if (dist <= distanceForHit)
                 {
                     hitT = tf;
                     hitHeight = h;
                     return true;
                 }
-
-                tf += max(abs(pf.y - h) * 0.5, 1.5f);
+                tf += max(abs(dist) * 0.2, 0.01);
             }
 
-            mip = max(0, (int) dimensions.z - 2);
+            mip++;
             t = tCellExit + e;
         }
 
@@ -356,8 +432,8 @@ bool TraverseHeightfieldMaxMipShadow(
     {
         float3 p = ro + rd * t;
 
-        uint3 mipSize;
-        _HeightMap.GetDimensions(mip, mipSize.x, mipSize.y, mipSize.z);
+        uint3 mipSize = max(dimensions >> mip, 1);
+        //_HeightMap.GetDimensions(mip, mipSize.x, mipSize.y, mipSize.z);
 
         float2 uv = p.xz / _ChunkSize;
         int2 cell = clamp((int2) floor(uv * mipSize.xy), int2(0, 0), int2(mipSize.xy) - 1);
@@ -386,7 +462,7 @@ bool TraverseHeightfieldMaxMipShadow(
 
         if (mip > 0)
         {
-            if (segMinY > cellHeight)
+            if (segMinY > cellHeight + distanceForHit)
             {
                 t = tCellExit + e;
             }
@@ -470,8 +546,8 @@ float Shadow(float3 ro, float3 rd, float mint)
             }
             
             res = min(res, degrees(_SunAngularRadius) * (h - _ShadowHitDistance) / max(hitT, 1e-3f));
-            float stepSize = clamp(h / abs(rd.y + 0.001f) * 0.5f, 60.f, maxStep);
-            hitT += stepSize;
+           // float stepSize = clamp(h / abs(rd.y + 0.001f) * 0.5f, 60.f, maxStep);
+            hitT +=  max(abs(h) * 0.2, 0.01);
 
         }
         res = saturate(res + AMBIENT_INTENSITY);
@@ -634,32 +710,32 @@ void Main (uint3 id : SV_DispatchThreadID)
         float3 ambientColor = 1.f;
         GetBRDF(mat, viewDirection, viewDirection, ambientColor, AMBIENT_INTENSITY, 1.f, diffuse, specular);
         
-        if (_UsePathtracedShadows)
-        {
-            float3 rOrigin = p + sunDir * 1.5f + float3(0, 1.0f, 0);
-            shadow = MarchedShadows(rOrigin, sunDir, 1.f, n, dims, uv,
-              Hash(id.x + id.y * dims.x) + _FrameIndex);
+        //if (_UsePathtracedShadows)
+        //{
+        //    float3 rOrigin = p + sunDir * 1.5f + float3(0, 1.0f, 0);
+        //    shadow = MarchedShadows(rOrigin, sunDir, 1.f, n, dims, uv,
+        //      Hash(id.x + id.y * dims.x) + _FrameIndex);
             
-            float2 tempShadows = _TemporalShadowPrev.Load(id);
-            float oldShadows = tempShadows.r;
-            float oldShadowSampleNum = tempShadows.g;
-            float newShadows = oldShadows + shadow;
-            float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
-            float shadowRes = newShadows / max(1.f, newShadowSampleNum);
-            shadow = newShadows / newShadowSampleNum;
-            //shadow = shadow;
+        //    float2 tempShadows = _TemporalShadowPrev.Load(id);
+        //    float oldShadows = tempShadows.r;
+        //    float oldShadowSampleNum = tempShadows.g;
+        //    float newShadows = oldShadows + shadow;
+        //    float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
+        //    float shadowRes = newShadows / max(1.f, newShadowSampleNum);
+        //    shadow = newShadows / newShadowSampleNum;
+        //    //shadow = shadow;
             
-            _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
-        }
-        else
-        {
-            shadow = Shadow(p + n * _ShdowEpsilon, sunDir, 1.5f);
-        }
+        //    _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
+        //}
+        //else
+        //{
+        //    shadow = Shadow(p + n * _ShdowEpsilon, sunDir, 1.5f);
+        //}
         
         //col.rgb = elevation / 100.0;
        // col.rgb = mat.baseColor;
-        // col.rgb = diffuse + specular;
-         col.rgb *= shadow;
+         col.rgb = diffuse + specular;
+        // col.rgb *= shadow;
         //col.rgb = (mat.normal + 1.f) * 0.5;
     }
    
