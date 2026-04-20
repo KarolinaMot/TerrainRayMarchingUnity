@@ -208,9 +208,7 @@ bool Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terra
             return true;
         }
             
-        float stepSize = clamp(h / abs(rDirection.y + 0.001f) * 0.5f, 0.01f, maxStep);
-        hitT += stepSize;
-
+        hitT += max(abs(h) * 0.01, 0.001f);
     }
 
     return false;
@@ -228,6 +226,11 @@ void GetTexelWorldPos(float2 mipSizeInPixels, uint2 texel, out float2 worldTexel
     float worldTexelSize = _ChunkSize / mipSizeInPixels;
     worldTexelPos1 = float2(texel) * worldTexelSize;
     worldTexelPos2 = float2(texel + 1) * worldTexelSize;
+}
+
+uint2 GetMipSize(int2 baseSize, int mip)
+{
+    return max(uint2(1u, 1u), baseSize >> mip);
 }
 
 bool TraverseHeightfieldMaxMip(
@@ -252,13 +255,12 @@ bool TraverseHeightfieldMaxMip(
 
     int mip = max(dimensions.z - 2, 0);
 
-    float e = 0.2f;
+    float e = 9e-3f;
     for (int i = 0; i < _MaxStepsOptimized && t < tMax; i++)
     {
         float3 p = ro + rd * t;
 
-        uint3 mipSize;
-        _HeightMap.GetDimensions(mip, mipSize.x, mipSize.y, mipSize.z);
+        uint2 mipSize = GetMipSize(dimensions.xy, mip);
 
         float2 uv = p.xz / _ChunkSize;
         int2 cell = clamp((int2) floor(uv * mipSize.xy), int2(0, 0), int2(mipSize.xy) - 1);
@@ -298,7 +300,6 @@ bool TraverseHeightfieldMaxMip(
         }
         else
         {
-            float dt = max((tCellExit - tCellEnter) / 8.0f, 1e-3f);
             float tf = tCellEnter;
 
             while (tf <= tCellExit)
@@ -313,11 +314,11 @@ bool TraverseHeightfieldMaxMip(
                     return true;
                 }
 
-                tf += dt;
+                tf += max(abs(pf.y - h) * 0.5, 1.5f);
             }
 
-            t = tCellExit + e;
             mip = max(0, (int) dimensions.z - 2);
+            t = tCellExit + e;
         }
 
     }
@@ -602,6 +603,10 @@ void Main (uint3 id : SV_DispatchThreadID)
         hit = Raymarch(cameraPos, rayDirection, hitT1, elevation, _MaxSteps, _DistanceForHit, 2e-4f);
     }
     
+    uint flippedY = dims.y - 1 - id.y;
+    float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
+    col.rgb = rtColor;
+
     if (hit)
     {
         uint2 heightmapDimensions;
@@ -653,15 +658,9 @@ void Main (uint3 id : SV_DispatchThreadID)
         
         //col.rgb = elevation / 100.0;
        // col.rgb = mat.baseColor;
-         col.rgb = diffuse + specular;
+        // col.rgb = diffuse + specular;
          col.rgb *= shadow;
         //col.rgb = (mat.normal + 1.f) * 0.5;
-    }
-    else
-    {
-        uint flippedY = dims.y - 1 - id.y;
-        float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
-        col.rgb = rtColor;
     }
    
     _Result[id.xy] = float4(col, 1.0);

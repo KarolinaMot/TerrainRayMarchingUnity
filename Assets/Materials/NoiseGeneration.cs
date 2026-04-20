@@ -50,6 +50,7 @@ public class NoiseGeneration : MonoBehaviour
 
     void Update()
     {
+        RunCompute();
     }
 
     RenderTexture CreateHeightTexture(int size)
@@ -210,6 +211,6 @@ public class NoiseGeneration : MonoBehaviour
             srcHeight = dstHeight;
         }
 
-        SaveRenderTextureAsRAW(heightmap, "Assets/Resources/Heightmaps/heightmap.raw");
+      //  SaveRenderTextureAsRAW(heightmap, "Assets/Resources/Heightmaps/heightmap.raw");
     }
 }
