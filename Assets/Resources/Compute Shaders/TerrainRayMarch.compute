@@ -340,7 +340,9 @@ bool TraverseHeightfieldMaxMip(
     if (!GetBoundsExit(ro, rd, float2(0.0, 0.0), float2(_ChunkSize, _ChunkSize), tEnterGlobal, tExitDomain))
         return false;
 
-    float e = 9e-1f;
+    float2 mip0Dimension = GetMipSize(dimensions.xy, 0);
+    float mip0cellDimension = _ChunkSize / float2(mip0Dimension);
+    float e = mip0cellDimension * 0.09f;
 
     int mip = max((int) dimensions.z - 8, 0);
     uint2 mipSize = GetMipSize(dimensions.xy, mip);
@@ -406,7 +408,6 @@ bool TraverseHeightfieldMaxMip(
 
                 t = 0.0;
                 tEnter = 0.0;
-                //tExit = 0.0;
 
                 InitializeDDA(deltaT, t_y, t_x, cellDimension, rayOriginInGrid.xz, rd.xz);
             }
@@ -415,34 +416,112 @@ bool TraverseHeightfieldMaxMip(
         {
             if (segMinY <= cellHeight + distanceForHit)
             {
-                hitT = tBase + t + e;
-                hitHeight = cellHeight; // debug: coarse leaf value
-                return true;
+                float ta = tEnter;
+                float tb = tExit;
+
+                float3 pa = rayOriginInGrid + rd * ta;
+                float3 pb = rayOriginInGrid + rd * tb;
+
+                float ha = SampleTerrainHeight(pa.xz);
+                float hb = SampleTerrainHeight(pb.xz);
+
+                float ga = pa.y - ha;
+                float gb = pb.y - hb;
+
+                // Already close enough at entry
+                if (ga <= distanceForHit)
+                {
+                    hitT = tBase + ta;
+                    hitHeight = ha;
+                    return true;
+                }
+
+                bool bracketed = (ga > distanceForHit && gb <= distanceForHit);
+
+                // If endpoints do not bracket, try a few probes inside the interval
+                if (!bracketed)
+                {
+                    float prevT = ta;
+                    float prevG = ga;
+
+                    [loop]
+                    for (int k = 1; k <= 4; k++)
+                    {
+                        float s = (float) k / 5.0;
+                        float tp = lerp(ta, tb, s);
+                        float3 pp = rayOriginInGrid + rd * tp;
+                        float hp = SampleTerrainHeight(pp.xz);
+                        float gp = pp.y - hp;
+
+                        if (prevG > distanceForHit && gp <= distanceForHit)
+                        {
+                            ta = prevT;
+                            tb = tp;
+                            ha = SampleTerrainHeight((rayOriginInGrid + rd * ta).xz);
+                            hb = hp;
+                            ga = prevG;
+                            gb = gp;
+                            bracketed = true;
+                            break;
+                        }
+
+                        prevT = tp;
+                        prevG = gp;
+                    }
+                }
+
+                if (bracketed)
+                {
+                    [loop]
+                    for (int j = 0; j < 8; j++)
+                    {
+                        float tm = 0.5 * (ta + tb);
+                        float3 pm = rayOriginInGrid + rd * tm;
+                        float hm = SampleTerrainHeight(pm.xz);
+                        float gm = pm.y - hm;
+
+                        if (gm <= distanceForHit)
+                        {
+                            tb = tm;
+                            hb = hm;
+                        }
+                        else
+                        {
+                            ta = tm;
+                            ha = hm;
+                        }
+                    }
+
+                    hitT = tBase + tb;
+                    hitHeight = hb;
+                    return true;
+                }
             }
-            else
-            {
-                float consumed = tExit;
 
-                mip++;
-                mipSize = GetMipSize(dimensions.xy, mip);
-                cellDimension = _ChunkSize / float2(mipSize);
+            // No actual hit found in this leaf interval, so advance past it
+            float consumed = tExit;
 
-                float3 pExit = rayOriginInGrid + rd * consumed;
-                rayOriginInGrid = pExit;
-                tBase += consumed;
-                tRemaining -= consumed;
+            int topMip = max((int) dimensions.z - 8, 0);
+            mip = min(mip + 1, topMip);
+            mipSize = GetMipSize(dimensions.xy, mip);
+            cellDimension = _ChunkSize / float2(mipSize);
 
-                t = 0.0;
-                tEnter = 0.0;
-                tExit = 0.0;
+            float3 pExit = rayOriginInGrid + rd * consumed;
+            rayOriginInGrid = pExit;
+            tBase += consumed;
+            tRemaining -= consumed;
 
-                InitializeDDA(deltaT, t_y, t_x, cellDimension, rayOriginInGrid.xz, rd.xz);
-            }
+            t = 0.0;
+            tEnter = 0.0;
+            tExit = 0.0;
+
+            InitializeDDA(deltaT, t_y, t_x, cellDimension, rayOriginInGrid.xz, rd.xz);
         }
     }
 
     return false;
 }
+
 bool TraverseHeightfieldMaxMipShadow(
     float3 ro,
     float3 rd,
@@ -773,8 +852,8 @@ void Main (uint3 id : SV_DispatchThreadID)
         //    shadow = Shadow(p + n * _ShdowEpsilon, sunDir, 1.5f);
         //}
         
-        //col.rgb = elevation / 100.0;
-       // col.rgb = mat.baseColor;
+       // col.rgb = elevation / 100.0;
+         //col.rgb = mat.baseColor;
          col.rgb = diffuse + specular;
         // col.rgb *= shadow;
         //col.rgb = (mat.normal + 1.f) * 0.5;
