@@ -288,7 +288,7 @@ MonoBehaviour:
   oceanDepth: 9.28
   sunAngularRadius: 0.58
   shadowSteps: 4196
-  shadowStepsOptimized: 252.3
+  shadowStepsOptimized: 600
   shadowSamples: 1
   shdowEpsilon: 0.92
   shadowHitDistance: 0

@@ -528,7 +528,6 @@ bool TraverseHeightfieldMaxMipShadow(
     out float hitT,
     out float hitHeight,
     float distanceForHit,
-    float minT,
     inout float softness)
 {
     uint3 dimensions;
@@ -537,94 +536,112 @@ bool TraverseHeightfieldMaxMipShadow(
     hitT = 0.0;
     hitHeight = 0.0;
 
-    float tEnter, tExitDomain;
-    if (!GetBoundsExit(ro, rd, float2(0.0, 0.0), float2(_ChunkSize, _ChunkSize), tEnter, tExitDomain))
+    float tEnterGlobal, tExitDomain;
+    if (!GetBoundsExit(ro, rd, float2(0.0, 0.0), float2(_ChunkSize, _ChunkSize), tEnterGlobal, tExitDomain))
         return false;
 
-    float t = max(tEnter, 0.0);
-    float maxT = tExitDomain;
-    
-    int mip = max(dimensions.z - 2, 0);
-    softness = 0.f;
-    
-    float e = 40.f;
-    for (int i = 0; i < _ShadowStepsOptimized && t < maxT; i++)
-    {
-        float3 p = ro + rd * t;
+    float2 mip0Dimension = GetMipSize(dimensions.xy, 0);
+    float mip0cellDimension = _ChunkSize / float2(mip0Dimension);
+    float e = mip0cellDimension *0.5f;
 
-        uint3 mipSize = max(dimensions >> mip, 1);
-        //_HeightMap.GetDimensions(mip, mipSize.x, mipSize.y, mipSize.z);
+    int mip = max((int) dimensions.z - 2, 0);
+    uint2 mipSize = GetMipSize(dimensions.xy, mip);
+    float2 cellDimension = _ChunkSize / float2(mipSize);
+
+    float tStartGlobal = max(tEnterGlobal, 0.0);
+    float tRemaining = tExitDomain - tStartGlobal;
+
+    float3 rayOriginInGrid = ro + rd * tStartGlobal;
+    rayOriginInGrid = rayOriginInGrid + rd * 40.f;
+    float tBase = tStartGlobal; // global ray-time of current local origin
+
+    float2 deltaT;
+    float t_x, t_y;
+    float t = 0.0;
+    float tEnter = 0.0;
+    float tExit = 0.0;
+
+    InitializeDDA(deltaT, t_y, t_x, cellDimension, rayOriginInGrid.xz, rd.xz);
+       
+    for (int i = 0; i < _ShadowStepsOptimized && t < tRemaining; i++)
+    {
+        float3 p = rayOriginInGrid + rd * t;
 
         float2 uv = p.xz / _ChunkSize;
-        int2 cell = clamp((int2) floor(uv * mipSize.xy), int2(0, 0), int2(mipSize.xy) - 1);
-
+        int2 cell = clamp((int2) floor(uv * float2(mipSize)), int2(0, 0), int2(mipSize) - 1);
         float cellHeight = LoadMipHeight(cell, mip);
 
-        float2 cellMin, cellMax;
-        GetTexelWorldPos(mipSize.xy, cell, cellMin, cellMax);
-
-        float tCellEnter, tCellExit;
-        if (!GetBoundsExit(ro, rd, cellMin, cellMax, tCellEnter, tCellExit))
-            return false;
-    
-        tCellEnter = max(tCellEnter, t);
-        tCellExit = min(tCellExit, maxT);
-
-        if (tCellExit <= tCellEnter)
+        if (t_x < t_y)
         {
-            t += e;
-            continue;
+            tExit = t_x + e;
+            t_x += deltaT.x;
+        }
+        else
+        {
+            tExit = t_y + e;
+            t_y += deltaT.y;
         }
 
-        float y0 = ro.y + rd.y * tCellEnter;
-        float y1 = ro.y + rd.y * tCellExit;
+        tExit = min(tExit, tRemaining);
+
+        float y0 = rayOriginInGrid.y + rd.y * tEnter;
+        float y1 = rayOriginInGrid.y + rd.y * tExit;
         float segMinY = min(y0, y1);
 
         if (mip > 0)
         {
             if (segMinY > cellHeight + distanceForHit)
             {
-                t = tCellExit + e;
+                tEnter = tExit;
+                t = tEnter;
             }
             else
             {
+                float consumed = t;
+
                 mip--;
+                mipSize = GetMipSize(dimensions.xy, mip);
+                cellDimension = _ChunkSize / float2(mipSize);
+
+                rayOriginInGrid = p;
+                tBase += consumed;
+                tRemaining -= consumed;
+
+                t = 0.0;
+                tEnter = 0.0;
+
+                InitializeDDA(deltaT, t_y, t_x, cellDimension, rayOriginInGrid.xz, rd.xz);
             }
         }
         else
         {
-            float dt = clamp(t * 0.25f, 0.01f, 100.0f);
-            float tf = tCellEnter;
-            
-            float maxT = tExitDomain;
-            float maxStep = maxT * 2e-4f; // allow crossing 2% of total range in one step
-
-            while (tf <= tCellExit)
+            if (segMinY <= cellHeight + distanceForHit)
             {
-                float3 pf = ro + rd * tf;
-                float h = SampleTerrainHeight(pf.xz);
-                float gap = pf.y - h;
-                float horizontalDist = tf * length(rd.xz); // horizontal distance along ray
-                softness = min(softness, degrees(_SunAngularRadius) * (gap - _ShadowHitDistance) / max(tf, 1e-3f));
-
-                if (gap <= distanceForHit * t)
-                {
-                    hitT = tf;
-                    hitHeight = h;
-                    return true;
-                }
-
-
-                float minStep = _ChunkSize / (_ShadowSteps * 4.0f);
-                float stepSize = clamp(gap * 0.5f / max(abs(rd.y), 0.01f), minStep, maxStep);
-                tf += stepSize;
+                hitT = t;
+                hitHeight = cellHeight;
+                return true;
             }
+            
+            // Missed in this leaf segment, so advance past it
+            float consumed = tExit;
 
-            t = tCellExit + e;
-            mip = max(0, (int) dimensions.z - 2);
+            mip++;
+            mipSize = GetMipSize(dimensions.xy, mip);
+            cellDimension = _ChunkSize / float2(mipSize);
 
+            float3 pExit = rayOriginInGrid + rd * consumed;
+            rayOriginInGrid = pExit;
+            tBase += consumed;
+            tRemaining -= consumed;
+
+            t = 0.0;
+            tEnter = 0.0;
+            tExit = 0.0;
+
+            InitializeDDA(deltaT, t_y, t_x, cellDimension, rayOriginInGrid.xz, rd.xz);
         }
     }
+
 
     return false;
 }
@@ -642,7 +659,7 @@ float Shadow(float3 ro, float3 rd, float mint)
     
     if(_UseRaymarchOptimization)
     {
-        blocked = TraverseHeightfieldMaxMipShadow(ro, rd, hitT, elevation, -0.8, mint, res);
+        blocked = TraverseHeightfieldMaxMipShadow(ro, rd, hitT, elevation, -0.8, res);
         res = saturate(res + AMBIENT_INTENSITY) + AMBIENT_INTENSITY;
     }
     else
@@ -715,7 +732,7 @@ float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims
         float res = 1.f;
         
         if (_UseRaymarchOptimization)
-            blocked = TraverseHeightfieldMaxMipShadow(ro, lightDir, t, heightTerrain, _ShadowHitDistance, mint, res);
+            blocked = TraverseHeightfieldMaxMipShadow(ro, lightDir, t, heightTerrain, _ShadowHitDistance, res);
         else
             blocked = Raymarch(ro, lightDir, t, heightTerrain, _ShadowSteps, _ShadowHitDistance, 1e-2f);
 
@@ -803,7 +820,7 @@ void Main (uint3 id : SV_DispatchThreadID)
     float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
     col.rgb = rtColor;
 
-    if (hit && _UsePathtracedShadows)
+    if (hit)
     {
         uint2 heightmapDimensions;
         _HeightMap.GetDimensions(heightmapDimensions.x, heightmapDimensions.y);
@@ -830,32 +847,32 @@ void Main (uint3 id : SV_DispatchThreadID)
         float3 ambientColor = 1.f;
         GetBRDF(mat, viewDirection, viewDirection, ambientColor, AMBIENT_INTENSITY, 1.f, diffuse, specular);
         
-        //if (_UsePathtracedShadows)
-        //{
-        //    float3 rOrigin = p + sunDir * 1.5f + float3(0, 1.0f, 0);
-        //    shadow = MarchedShadows(rOrigin, sunDir, 1.f, n, dims, uv,
-        //      Hash(id.x + id.y * dims.x) + _FrameIndex);
+        if (_UsePathtracedShadows)
+        {
+            float3 rOrigin = p + sunDir * 1.5f + float3(0, 1.0f, 0);
+            shadow = MarchedShadows(rOrigin, sunDir, 1.f, n, dims, uv,
+              Hash(id.x + id.y * dims.x) + _FrameIndex);
             
-        //    float2 tempShadows = _TemporalShadowPrev.Load(id);
-        //    float oldShadows = tempShadows.r;
-        //    float oldShadowSampleNum = tempShadows.g;
-        //    float newShadows = oldShadows + shadow;
-        //    float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
-        //    float shadowRes = newShadows / max(1.f, newShadowSampleNum);
-        //    shadow = newShadows / newShadowSampleNum;
-        //    //shadow = shadow;
+            float2 tempShadows = _TemporalShadowPrev.Load(id);
+            float oldShadows = tempShadows.r;
+            float oldShadowSampleNum = tempShadows.g;
+            float newShadows = oldShadows + shadow;
+            float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
+            float shadowRes = newShadows / max(1.f, newShadowSampleNum);
+            //shadow = newShadows / newShadowSampleNum;
+            shadow = shadow;
             
-        //    _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
-        //}
-        //else
-        //{
-        //    shadow = Shadow(p + n * _ShdowEpsilon, sunDir, 1.5f);
-        //}
+            _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
+        }
+        else
+        {
+            shadow = Shadow(p + n * _ShdowEpsilon, sunDir, 1.5f);
+        }
         
        // col.rgb = elevation / 100.0;
          //col.rgb = mat.baseColor;
          col.rgb = diffuse + specular;
-        // col.rgb *= shadow;
+         col.rgb *= shadow;
         //col.rgb = (mat.normal + 1.f) * 0.5;
     }
    
