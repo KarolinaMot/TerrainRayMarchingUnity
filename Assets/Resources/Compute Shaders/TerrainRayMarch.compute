@@ -295,108 +295,94 @@ bool TraverseHeightfieldMaxMip(
     hitT = 0.0;
     hitHeight = 0.0;
 
-    //float tEnter, tExitDomain;
-    //if (!GetBoundsExit(ro, rd, float2(0.0, 0.0), float2(_ChunkSize, _ChunkSize), tEnter, tExitDomain))
-    //    return false;
+    float tEnterGlobal, tExitDomain;
+    if (!GetBoundsExit(ro, rd, float2(0.0, 0.0), float2(_ChunkSize, _ChunkSize), tEnterGlobal, tExitDomain))
+        return false;
 
-    //float t = max(tEnter, 0.0);
-    //float tMax = tExitDomain;
+    float e = 9e-3f;
 
+    //int mip = max((int) dimensions.z - 8, 0);
+    int mip = 0.f;
+    uint2 mipSize = GetMipSize(dimensions.xy, mip);
+    float2 cellDimension = _ChunkSize / float2(mipSize);
 
-    //float e = 9e-3f;
-    
-    int mip = max(dimensions.z - 2, 0);
+    float tStartGlobal = max(tEnterGlobal, 0.0);
+    float tEnd = tExitDomain - tStartGlobal;
+
+    float3 rayOriginInGrid = ro + rd * tStartGlobal;
+
     float2 deltaT;
     float t_x, t_y;
-    float cellDimension = 1 / _ChunkSize;
-    
-    if (rd.x < 0)
+    float t = 0.0;
+    float tEnter = 0.0;
+    float tExit = 0.0;
+
+    if (abs(rd.x) < 1e-8)
     {
-        deltaT.x = -_ChunkSize / rd.x;
-        t_x = (floor(ro.x / cellDimension) * cellDimension - ro.x) / rd.x;
+        deltaT.x = 1e30;
+        t_x = 1e30;
+    }
+    else if (rd.x < 0)
+    {
+        deltaT.x = cellDimension.x / abs(rd.x);
+        t_x = (floor(rayOriginInGrid.x / cellDimension.x) * cellDimension.x - rayOriginInGrid.x) / rd.x;
     }
     else
     {
-        deltaT.x = _ChunkSize / rd.x;
-        t_x = ((floor(ro.x / cellDimension) + 1) * cellDimension - ro.x) / rd.x;
+        deltaT.x = cellDimension.x / abs(rd.x);
+        t_x = ((floor(rayOriginInGrid.x / cellDimension.x) + 1.0) * cellDimension.x - rayOriginInGrid.x) / rd.x;
     }
-    if (rd[1] < 0)
+
+    if (abs(rd.z) < 1e-8)
     {
-        deltaT.y = -_ChunkSize / rd.y;
-        t_y = (floor(ro.y / cellDimension) * cellDimension - ro.y) / rd.y;
+        deltaT.y = 1e30;
+        t_y = 1e30;
+    }
+    else if (rd.z < 0)
+    {
+        deltaT.y = cellDimension.y / abs(rd.z);
+        t_y = (floor(rayOriginInGrid.z / cellDimension.y) * cellDimension.y - rayOriginInGrid.z) / rd.z;
     }
     else
     {
-        deltaT.y = _ChunkSize / rd.y;
-        t_y = ((floor(ro.y / cellDimension) + 1) * cellDimension - ro.y) / rd.y;
+        deltaT.y = cellDimension.y / abs(rd.z);
+        t_y = ((floor(rayOriginInGrid.z / cellDimension.y) + 1.0) * cellDimension.y - rayOriginInGrid.z) / rd.z;
     }
 
-    for (int i = 0; i < _MaxStepsOptimized &&; i++)
+    for (int i = 0; i < _MaxStepsOptimized && t < tEnd; i++)
     {
-        float3 p = ro + rd * t;
+        float3 p = rayOriginInGrid + rd * t;
 
-        uint2 mipSize = GetMipSize(dimensions.xy, mip);
         float2 uv = p.xz / _ChunkSize;
-        
-
-        int2 cell = clamp((int2) floor(uv * mipSize.xy), int2(0, 0), int2(mipSize.xy) - 1);
-
+        int2 cell = clamp((int2) floor(uv * float2(mipSize)), int2(0, 0), int2(mipSize) - 1);
         float cellHeight = LoadMipHeight(cell, mip);
 
-        float2 cellMin, cellMax;
-        GetTexelWorldPos(mipSize.xy, cell, cellMin, cellMax);
-
-        float tCellEnter, tCellExit;
-        if (!GetBoundsExit(ro, rd, cellMin, cellMax, tCellEnter, tCellExit))
-            return false;
-
-        tCellEnter = max(tCellEnter, t);
-        tCellExit = min(tCellExit, tMax);
-
-        if (tCellExit <= tCellEnter)
+        if (t_x < t_y)
         {
-            t += e;
-            continue;
-        }
-
-        float y0 = ro.y + rd.y * tCellEnter;
-        float y1 = ro.y + rd.y * tCellExit;
-        float segMinY = min(y0, y1);
-
-        if (mip > 0)
-        {
-            if (segMinY > cellHeight)
-            {
-                t = tCellExit + e;
-            }
-            else
-            {
-                mip--;
-            }
+            tExit = t_x + e;
+            t_x += deltaT.x;
         }
         else
         {
-            float tf = tCellEnter;
-
-            while (tf <= tCellExit)
-            {
-                float3 pf = ro + rd * tf;
-                float h = SampleTerrainHeight(pf.xz);
-                float dist = pf.y - h;
-                
-                if (dist <= distanceForHit)
-                {
-                    hitT = tf;
-                    hitHeight = h;
-                    return true;
-                }
-                tf += max(abs(dist) * 0.2, 0.01);
-            }
-
-            mip++;
-            t = tCellExit + e;
+            tExit = t_y + e;
+            t_y += deltaT.y;
         }
 
+        float y0 = rayOriginInGrid.y + rd.y * tEnter;
+        float y1 = rayOriginInGrid.y + rd.y * tExit;
+        float segMinY = min(y0, y1);
+
+        if (segMinY > cellHeight + distanceForHit)
+        {
+            tEnter = tExit;
+            t = tEnter;
+        }
+        else
+        {
+            hitT = t +e;
+            hitHeight = cellHeight; // or SampleTerrainHeight(p.xz) if you want
+            return true;
+        }
     }
 
     return false;
@@ -683,7 +669,7 @@ void Main (uint3 id : SV_DispatchThreadID)
     float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
     col.rgb = rtColor;
 
-    if (hit)
+    if (hit && _UsePathtracedShadows)
     {
         uint2 heightmapDimensions;
         _HeightMap.GetDimensions(heightmapDimensions.x, heightmapDimensions.y);
@@ -734,7 +720,7 @@ void Main (uint3 id : SV_DispatchThreadID)
         
         //col.rgb = elevation / 100.0;
        // col.rgb = mat.baseColor;
-         col.rgb = diffuse + specular;
+         col.rgb = elevation / 20000.f;
         // col.rgb *= shadow;
         //col.rgb = (mat.normal + 1.f) * 0.5;
     }
