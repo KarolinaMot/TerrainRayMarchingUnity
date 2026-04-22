@@ -11,7 +11,6 @@ public class NoiseGeneration : MonoBehaviour
     public float chunkSize = 128;
     private ComputeShader noiseCS;
     private ComputeShader mipCS;
-    private Camera camera;
 
     [Header("Terrain generation")]
     public int octaves = 2;
@@ -24,35 +23,12 @@ public class NoiseGeneration : MonoBehaviour
     public float mountainRangeContrast = 7.73f;
     public float mountainRangeDensity = 0.005f;
 
+    [Header("Output")]
+    public string output;
+
     [HideInInspector]
     public RenderTexture heightmap;
-    public RenderTexture tempHightmap;
-
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-    void Start()
-    {
-        camera = GetComponent<Camera>();
-
-        noiseCS = Resources.Load<ComputeShader>("Compute Shaders/NoiseGeneration");
-        mipCS = Resources.Load<ComputeShader>("Compute Shaders/MipMapGen");
-        
-        if (noiseCS == null)
-        {
-            Debug.LogError("Failed to load compute shader: Compute Shaders/NoiseGeneration");
-            return;
-        }
-
-        heightmap = CreateHeightTexture(verticesPerChunk);
-        tempHightmap = CreateHeightTexture(verticesPerChunk);
-
-        RunCompute();
-    }
-
-    void Update()
-    {
-        RunCompute();
-    }
-
+    private RenderTexture tempHightmap;
     RenderTexture CreateHeightTexture(int size)
     {
         var desc = new RenderTextureDescriptor(size, size, GraphicsFormat.R32_SFloat, 0);
@@ -73,6 +49,7 @@ public class NoiseGeneration : MonoBehaviour
     }
     public static void SaveRenderTextureAsRAW(RenderTexture rt, string path)
     {
+
         Texture2D tex = new Texture2D(rt.width, rt.height, TextureFormat.RFloat, false, true);
 
         RenderTexture previous = RenderTexture.active;
@@ -125,43 +102,24 @@ public class NoiseGeneration : MonoBehaviour
 
         System.IO.File.WriteAllBytes(path, bytes);
 
-        // Create PNG texture (8-bit grayscale preview)
-        Texture2D pngTex = new Texture2D(rt.width, rt.height, TextureFormat.RGB24, false, true);
-
-        UnityEngine.Color[] colors = new UnityEngine.Color[data.Length];
-
-        if (!Mathf.Approximately(minH, maxH))
-        {
-            for (int i = 0; i < data.Length; i++)
-            {
-                float normalized = Mathf.InverseLerp(minH, maxH, data[i]);
-                colors[i] = new UnityEngine.Color(normalized, normalized, normalized);
-            }
-        }
-        else
-        {
-            for (int i = 0; i < data.Length; i++)
-            {
-                colors[i] = UnityEngine.Color.black;
-            }
-        }
-
-        pngTex.SetPixels(colors);
-        pngTex.Apply();
-
-        // Save PNG
-        string pngPath = path.Replace(".raw", ".png");
-        byte[] pngBytes = pngTex.EncodeToPNG();
-        System.IO.File.WriteAllBytes(pngPath, pngBytes);
-
-        UnityEngine.Object.Destroy(pngTex);
-        UnityEngine.Object.Destroy(tex);
     }
 
     // Update is called once per frame
     [ContextMenu("Generate Noise")]
     void RunCompute()
     {
+        noiseCS = Resources.Load<ComputeShader>("Compute Shaders/NoiseGeneration");
+        mipCS = Resources.Load<ComputeShader>("Compute Shaders/MipMapGen");
+
+        if (noiseCS == null)
+        {
+            Debug.LogError("Failed to load compute shader: Compute Shaders/NoiseGeneration");
+            return;
+        }
+
+        heightmap = CreateHeightTexture(verticesPerChunk);
+        tempHightmap = CreateHeightTexture(verticesPerChunk);
+
         int kernel = noiseCS.FindKernel("Main");
         int mipKernel = mipCS.FindKernel("ReduceMaxMip");
 
@@ -211,6 +169,6 @@ public class NoiseGeneration : MonoBehaviour
             srcHeight = dstHeight;
         }
 
-      //  SaveRenderTextureAsRAW(heightmap, "Assets/Resources/Heightmaps/heightmap.raw");
+        SaveRenderTextureAsRAW(heightmap, output);
     }
 }

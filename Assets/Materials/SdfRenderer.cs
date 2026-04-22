@@ -10,7 +10,10 @@ public class SdfRenderer : MonoBehaviour
     private ComputeShader marchCS;
     private Camera camera;
     private Light sun;
-    private NoiseGeneration noiseGen;
+
+    public int heightfieldDimensions;
+    public float worldSize;
+    public string heightMapFilePath;
 
     [Header("Ray-marching")]
     public int maxSteps = 100;
@@ -53,13 +56,46 @@ public class SdfRenderer : MonoBehaviour
     int prevShadowSamples;
     bool prevUseBlueNoise;
     bool prevUsePathtraced;
+    private Texture2D heightTexture;
+
+    public void LoadRaw()
+    {
+        byte[] bytes = System.IO.File.ReadAllBytes(heightMapFilePath);
+
+
+        int expectedBytes = heightfieldDimensions * heightfieldDimensions * 2; // 16-bit
+        if (bytes.Length != expectedBytes)
+        {
+            Debug.LogError($"RAW size mismatch. Expected {expectedBytes} bytes, got {bytes.Length}");
+            return;
+        }
+
+        heightTexture = new Texture2D(heightfieldDimensions, heightfieldDimensions, TextureFormat.RFloat, false, true);
+
+        Color[] pixels = new Color[heightfieldDimensions * heightfieldDimensions];
+
+        for (int i = 0; i < heightfieldDimensions * heightfieldDimensions; i++)
+        {
+            int byteIndex = i * 2;
+
+            // little-endian ushort
+            ushort value = (ushort)(bytes[byteIndex] | (bytes[byteIndex + 1] << 8));
+
+            float normalized = value / 65535.0f;
+            pixels[i] = new Color(normalized, 0, 0, 1);
+        }
+
+        heightTexture.SetPixels(pixels);
+        heightTexture.Apply();
+
+        Debug.Log("RAW heightmap loaded.");
+    }
 
     private void Start()
     {
         marchCS = Resources.Load<ComputeShader>("Compute Shaders/TerrainRayMarch");
-
+        LoadRaw();
         camera = GetComponent<Camera>();
-        noiseGen = GetComponent<NoiseGeneration>();
         sun = RenderSettings.sun;
 
         for (int i = 0; i < 2; i++)
@@ -74,12 +110,6 @@ public class SdfRenderer : MonoBehaviour
     }
     private void Update()
     {
-        if (!noiseGen)
-        {
-            Debug.LogError("Noise generator not found");
-            return;
-        }
-
         CommandBuffer cmd = new CommandBuffer()
         {
             name = "My Cmd Buffer2"
@@ -187,7 +217,7 @@ public class SdfRenderer : MonoBehaviour
 
         cmd.SetComputeIntParam(marchCS, "_MaxSteps", maxSteps);
         cmd.SetComputeFloatParam(marchCS, "_DistanceForHit", distanceForHit);
-        cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMap", noiseGen.heightmap);
+        cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMap", heightTexture);
 
         Vector4 color = new Vector4(grassColor.r, grassColor.g, grassColor.b, 0.8f);
         Vector4 waterColorRoughness = new Vector4(waterColor.r, waterColor.g, waterColor.b, 0.1f);
@@ -215,7 +245,7 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeVectorParam(marchCS, "_SunColor", sunColor);
         cmd.SetComputeFloatParam(marchCS, "_SunAngularRadius", sunAngularRadius);
         cmd.SetComputeFloatParam(marchCS, "_ShdowEpsilon", shdowEpsilon);
-        cmd.SetComputeFloatParam(marchCS, "_ChunkSize", noiseGen.chunkSize);
+        cmd.SetComputeFloatParam(marchCS, "_ChunkSize", worldSize);
         cmd.SetComputeFloatParam(marchCS, "_ShadowHitDistance", shadowHitDistance);
         cmd.SetComputeVectorParam(marchCS, "_ChunkCoord", new Vector2(0f,0f));
         cmd.SetComputeFloatParam(marchCS, "_ShadowSteps", shadowSteps);
