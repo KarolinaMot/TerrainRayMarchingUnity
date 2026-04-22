@@ -4,9 +4,12 @@
 #include "../Includes/Noise.hlsl"
 #include "../Includes/BlueNoise.hlsl"
 #include "../Includes/PBR.hlsl"
-#define AMBIENT_INTENSITY 0.4f
+#define AMBIENT_INTENSITY 0.2f
 // Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
+
+uint _Render;
+uint _RenderMesh;
 
 //Ray marching parameters
 int _MaxSteps;
@@ -14,8 +17,9 @@ int _MaxStepsOptimized;
 float _DistanceForHit;
 
 //Heightmap and info
-Texture2D<float> _HeightMap;
+Texture2D<float> _MeshHeightMap;
 float _ChunkSize;
+float _HeightMultiplier;
 
 //Material values
 float4 _GrassColorRoughness;
@@ -38,6 +42,7 @@ float _ShadowStepsOptimized;
 float _ShadowHitDistance;
 uint _ShadowSamples;
 float _ShdowEpsilon;
+float _ShdowEpsilonOptimized;
 uint _UseBlueNoise;
 uint _UsePathtracedShadows;
 uint _UseRaymarchOptimization;
@@ -81,7 +86,7 @@ bool IsInsideChunk(float2 worldXZ, float2 boundMin, float2 boundMax)
 float SampleTerrainHeight(float2 xz)
 {
     float2 uv = xz / _ChunkSize;
-    return _HeightMap.SampleLevel(linearClampSampler, uv, 0);
+    return _MeshHeightMap.SampleLevel(linearClampSampler, uv, 0) * _HeightMultiplier;
 }
 
 bool IsBelowTerrain(float3 camPos)
@@ -218,7 +223,7 @@ bool Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terra
 
 float LoadMipHeight(int2 texel, int mip)
 {
-    return _HeightMap.Load(int3(texel, mip));
+    return _MeshHeightMap.Load(int3(texel, mip)) * _HeightMultiplier;
 }
 
 void GetTexelWorldPos(float2 mipSizeInPixels, uint2 texel, out float2 worldTexelPos1, out float2 worldTexelPos2)
@@ -232,55 +237,6 @@ uint2 GetMipSize(int2 baseSize, int mip)
 {
     return max(uint2(1u, 1u), baseSize >> mip);
 }
-
-//Vec2f rayDirection = { ..., ... }; // assumed normalized
-//Vec2f rayOrigin = { ..., ... };
-//Vec2f gridResolution = { ..., ... };
-//Vec2f cellDimension = (gridMax - gridMin) / gridResolution;
-//Vec2f deltaT, nextCrossingT;
-//Vec2f rayOrigGrid = rayOrigin - gridMin;
-//
-//if (rayDirection[0] < 0) {
-//    deltaT[0] = -gridDimension[0] /RayDirection[0];
-//    t_x = (floor(rayOrigGrid[0] / cellDimension[0]) * cellDimension[0] - rayOrigGrid[0]) / rayDirection[0];
-//}
-//else {
-//    deltaT[0] = gridDimension[0] /RayDirection[0];
-//    t_x = ((floor(rayOrigGrid[0] / cellDimension[0]) + 1) * cellDimension[0] - rayOrigGrid[0]) / rayDirection[0];
-//}
-//if (rayDirection[1] < 0) {
-//    deltaT[1] = -gridDimension[1] / RayDirection[1];
-//    t_y = (floor(rayOrigGrid[1] / cellDimension[1]) * cellDimension[1] - rayOrigGrid[1]) / rayDirection[1];
-//}
-//else {
-//    deltaT[1] = gridDimension[1] / RayDirection[1];
-//    t_y = ((floor(rayOrigGrid[1] / cellDimension[1]) + 1) * cellDimension[1]  - rayOrigGrid[1]) / rayDirection[1];
-//}
-//
-//float t = 0;
-//Vec2i cellIndex = { .., ... }; // origin of the ray (cell index)
-//while (1) {
-//    if (t_x < t_y) {
-//        t =t_x; // current t, next intersection with cell along ray
-//        t_x+=deltaT[0]; // increment, next crossing along x
-//        if (rayDirection[0] < 0)
-//            cellIndex[0] -= 1;
-//        else
-//            cellIndex[0] += 1;
-//    }
-//    else {
-//        t = t_y;
-//        t_y += deltaT[1]; // increment, next crossing along y
-//        if (rayDirection[1] < 0)
-//            cellIndex[1] -= 1;
-//        else
-//            cellIndex[1] += 1;
-//    }
-//	// if some condition is met break from the loop
-//    if (cellIndex[0] < 0 || cellIndex[1] < 0 || 
-//        cellIndex[0] > gridDimension[0] - 1 || cellIndex[1] > gridDimension[1] - 1) 
-//        break;
-//    }
 
 void InitializeDDA(
     out float2 deltaT,
@@ -331,7 +287,7 @@ bool TraverseHeightfieldMaxMip(
     float distanceForHit)
 {
     uint3 dimensions;
-    _HeightMap.GetDimensions(0, dimensions.x, dimensions.y, dimensions.z);
+    _MeshHeightMap.GetDimensions(0, dimensions.x, dimensions.y, dimensions.z);
 
     hitT = 0.0;
     hitHeight = 0.0;
@@ -531,7 +487,7 @@ bool TraverseHeightfieldMaxMipShadow(
     inout float softness)
 {
     uint3 dimensions;
-    _HeightMap.GetDimensions(0, dimensions.x, dimensions.y, dimensions.z);
+    _MeshHeightMap.GetDimensions(0, dimensions.x, dimensions.y, dimensions.z);
 
     hitT = 0.0;
     hitHeight = 0.0;
@@ -552,7 +508,7 @@ bool TraverseHeightfieldMaxMipShadow(
     float tRemaining = tExitDomain - tStartGlobal;
 
     float3 rayOriginInGrid = ro + rd * tStartGlobal;
-    rayOriginInGrid = rayOriginInGrid + rd * 40.f;
+    rayOriginInGrid = rayOriginInGrid + rd * _ShdowEpsilonOptimized;
     float tBase = tStartGlobal; // global ray-time of current local origin
 
     float2 deltaT;
@@ -774,7 +730,7 @@ void Main (uint3 id : SV_DispatchThreadID)
 
     float2 uv = (float2(id.xy) + 0.5) / float2(dims.x, dims.y);
     
-    float value = _HeightMap.SampleLevel(sampler_HeightMap, uv, 0);
+    float value = _MeshHeightMap.SampleLevel(sampler_HeightMap, uv, 0);
 
     // 0..1 -> -1..1
     float2 ndc = uv * 2.0 - 1.0;
@@ -807,11 +763,11 @@ void Main (uint3 id : SV_DispatchThreadID)
 
     bool hit = false;
     
-    if (_UseRaymarchOptimization)
+    if (_Render && _UseRaymarchOptimization)
     {
          hit = TraverseHeightfieldMaxMip(cameraPos, rayDirection, hitT1, elevation, _DistanceForHit);
     }
-    else
+    else if (_Render)
     {
         hit = Raymarch(cameraPos, rayDirection, hitT1, elevation, _MaxSteps, _DistanceForHit, 2e-4f);
     }
@@ -820,10 +776,10 @@ void Main (uint3 id : SV_DispatchThreadID)
     float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
     col.rgb = rtColor;
 
-    if (hit)
+    if (_Render && hit)
     {
         uint2 heightmapDimensions;
-        _HeightMap.GetDimensions(heightmapDimensions.x, heightmapDimensions.y);
+        _MeshHeightMap.GetDimensions(heightmapDimensions.x, heightmapDimensions.y);
         float3 p = cameraPos + rayDirection * hitT1;
         float3 n = GetNormal(p, belowTerrain, hitT1, heightmapDimensions.x);
         float4 biomeValue = BiomeColor(elevation);
@@ -859,7 +815,7 @@ void Main (uint3 id : SV_DispatchThreadID)
             float newShadows = oldShadows + shadow;
             float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
             float shadowRes = newShadows / max(1.f, newShadowSampleNum);
-            //shadow = newShadows / newShadowSampleNum;
+            shadow = newShadows / newShadowSampleNum;
             shadow = shadow;
             
             _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
@@ -869,9 +825,10 @@ void Main (uint3 id : SV_DispatchThreadID)
             shadow = Shadow(p + n * _ShdowEpsilon, sunDir, 1.5f);
         }
         
-       // col.rgb = elevation / 100.0;
+         //col.rgb = elevation / 1000.0;
          //col.rgb = mat.baseColor;
-         col.rgb = diffuse + specular;
+        if (_RenderMesh)
+            col.rgb = diffuse + specular;
          col.rgb *= shadow;
         //col.rgb = (mat.normal + 1.f) * 0.5;
     }
