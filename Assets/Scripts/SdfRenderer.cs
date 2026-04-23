@@ -25,7 +25,6 @@ public class SdfRenderer : MonoBehaviour
     public int maxSteps = 100;
     public int maxStepsOptimized = 100;
     public float distanceForHit = 0.001f;
-    public float maxDistance = 20000f;
     [Space(10)]
 
 
@@ -257,7 +256,6 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeIntParam(marchCS, "_ShadowSamples", (int)shadowSamples);
         cmd.SetComputeIntParam(marchCS, "_UseBlueNoise", useBlueNoise ? 1 : 0);
         cmd.SetComputeIntParam(marchCS, "_UsePathtracedShadows", pathTracedShadows ? 1 : 0);
-        cmd.SetComputeFloatParam(marchCS, "_MaxDistance", maxDistance);
         cmd.SetComputeIntParam(marchCS, "_UseRaymarchOptimization", optimizeTracing ? 1 : 0);
         cmd.SetComputeIntParam(marchCS, "_Render", raymarch ? 1 : 0);
         cmd.SetComputeIntParam(marchCS, "_RenderMesh", visualizeMesh ? 1 : 0);
