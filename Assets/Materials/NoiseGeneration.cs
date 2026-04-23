@@ -26,7 +26,7 @@ public class NoiseGeneration : MonoBehaviour
 
     [HideInInspector]
     public RenderTexture heightmap;
-    public RenderTexture tempHightmap;
+    private RenderTexture tempHightmap;
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
@@ -50,7 +50,6 @@ public class NoiseGeneration : MonoBehaviour
 
     void Update()
     {
-        RunCompute();
     }
 
     RenderTexture CreateHeightTexture(int size)
@@ -74,14 +73,6 @@ public class NoiseGeneration : MonoBehaviour
     public static void SaveRenderTextureAsRAW(RenderTexture rt, string path)
     {
         Texture2D tex = new Texture2D(rt.width, rt.height, TextureFormat.RFloat, false, true);
-
-        RenderTexture previous = RenderTexture.active;
-        RenderTexture.active = rt;
-
-        tex.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
-        tex.Apply();
-
-        RenderTexture.active = previous;
 
         float[] data = tex.GetRawTextureData<float>().ToArray();
 
@@ -122,8 +113,6 @@ public class NoiseGeneration : MonoBehaviour
             bytes[i * 2] = (byte)(raw[i] & 0xFF);
             bytes[i * 2 + 1] = (byte)((raw[i] >> 8) & 0xFF);
         }
-
-        System.IO.File.WriteAllBytes(path, bytes);
 
         // Create PNG texture (8-bit grayscale preview)
         Texture2D pngTex = new Texture2D(rt.width, rt.height, TextureFormat.RGB24, false, true);
@@ -211,6 +200,5 @@ public class NoiseGeneration : MonoBehaviour
             srcHeight = dstHeight;
         }
 
-      //  SaveRenderTextureAsRAW(heightmap, "Assets/Resources/Heightmaps/heightmap.raw");
     }
 }

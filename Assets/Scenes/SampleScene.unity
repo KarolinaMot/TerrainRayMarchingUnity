@@ -133,6 +133,7 @@ GameObject:
   - component: {fileID: 330585547}
   - component: {fileID: 330585551}
   - component: {fileID: 330585549}
+  - component: {fileID: 330585552}
   - component: {fileID: 330585550}
   - component: {fileID: 330585548}
   m_Layer: 0
@@ -336,7 +337,6 @@ MonoBehaviour:
   mountainRangeContrast: 3.97
   mountainRangeDensity: 0.00012
   heightmap: {fileID: 0}
-  tempHightmap: {fileID: 0}
 --- !u!114 &330585551
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -349,7 +349,28 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 27d5d53505364234cb7d4adb0dbd7bea, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  blueNoise: {fileID: 2800000, guid: 0aaf58cc035d7c74999ddc68224f9e70, type: 3}
+  blueNoise: {fileID: 18700000, guid: ce7ed781b34629845b5875625cde4336, type: 3}
+--- !u!114 &330585552
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 330585543}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9d6e560555409254d88796c1f2aa52ec, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  targetRenderer: {fileID: -7635826562936255635, guid: 839e5eb85092ed249a0389dcda17bd01, type: 3}
+  outputPath: Assets/Resources/Heightmaps/BakedHeightmap.raw
+  resolution: 4096
+  bakeLayer:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  HeightTexture: {fileID: 0}
+  max: 0
+  min: 0
 --- !u!1 &410087039
 GameObject:
   m_ObjectHideFlags: 0

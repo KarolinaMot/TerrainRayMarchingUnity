@@ -1,5 +1,6 @@
 ﻿// Each #kernel tells which function to compile; you can have many kernels
 #pragma kernel Main
+#pragma enable_d3d11_debug_symbols
 
 #include "../Includes/Noise.hlsl"
 #include "../Includes/BlueNoise.hlsl"
@@ -199,7 +200,7 @@ bool Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terra
     for (int i = 0; i < maxSteps && hitT < maxT; i++)
     {
         float3 p = rOrigin + rDirection * hitT;
-        float terrainY = SampleTerrainHeight(p.xz);
+        float terrainY = SampleTerrainHeight(p.xz) / 100.f;
         float h = p.y - terrainY;
 
         if (h < distanceForHit * hitT)
@@ -232,55 +233,6 @@ uint2 GetMipSize(int2 baseSize, int mip)
 {
     return max(uint2(1u, 1u), baseSize >> mip);
 }
-
-//Vec2f rayDirection = { ..., ... }; // assumed normalized
-//Vec2f rayOrigin = { ..., ... };
-//Vec2f gridResolution = { ..., ... };
-//Vec2f cellDimension = (gridMax - gridMin) / gridResolution;
-//Vec2f deltaT, nextCrossingT;
-//Vec2f rayOrigGrid = rayOrigin - gridMin;
-//
-//if (rayDirection[0] < 0) {
-//    deltaT[0] = -gridDimension[0] /RayDirection[0];
-//    t_x = (floor(rayOrigGrid[0] / cellDimension[0]) * cellDimension[0] - rayOrigGrid[0]) / rayDirection[0];
-//}
-//else {
-//    deltaT[0] = gridDimension[0] /RayDirection[0];
-//    t_x = ((floor(rayOrigGrid[0] / cellDimension[0]) + 1) * cellDimension[0] - rayOrigGrid[0]) / rayDirection[0];
-//}
-//if (rayDirection[1] < 0) {
-//    deltaT[1] = -gridDimension[1] / RayDirection[1];
-//    t_y = (floor(rayOrigGrid[1] / cellDimension[1]) * cellDimension[1] - rayOrigGrid[1]) / rayDirection[1];
-//}
-//else {
-//    deltaT[1] = gridDimension[1] / RayDirection[1];
-//    t_y = ((floor(rayOrigGrid[1] / cellDimension[1]) + 1) * cellDimension[1]  - rayOrigGrid[1]) / rayDirection[1];
-//}
-//
-//float t = 0;
-//Vec2i cellIndex = { .., ... }; // origin of the ray (cell index)
-//while (1) {
-//    if (t_x < t_y) {
-//        t =t_x; // current t, next intersection with cell along ray
-//        t_x+=deltaT[0]; // increment, next crossing along x
-//        if (rayDirection[0] < 0)
-//            cellIndex[0] -= 1;
-//        else
-//            cellIndex[0] += 1;
-//    }
-//    else {
-//        t = t_y;
-//        t_y += deltaT[1]; // increment, next crossing along y
-//        if (rayDirection[1] < 0)
-//            cellIndex[1] -= 1;
-//        else
-//            cellIndex[1] += 1;
-//    }
-//	// if some condition is met break from the loop
-//    if (cellIndex[0] < 0 || cellIndex[1] < 0 || 
-//        cellIndex[0] > gridDimension[0] - 1 || cellIndex[1] > gridDimension[1] - 1) 
-//        break;
-//    }
 
 void InitializeDDA(
     out float2 deltaT,
@@ -774,8 +726,6 @@ void Main (uint3 id : SV_DispatchThreadID)
 
     float2 uv = (float2(id.xy) + 0.5) / float2(dims.x, dims.y);
     
-    float value = _HeightMap.SampleLevel(sampler_HeightMap, uv, 0);
-
     // 0..1 -> -1..1
     float2 ndc = uv * 2.0 - 1.0;
 
@@ -809,7 +759,7 @@ void Main (uint3 id : SV_DispatchThreadID)
     
     if (_UseRaymarchOptimization)
     {
-         hit = TraverseHeightfieldMaxMip(cameraPos, rayDirection, hitT1, elevation, _DistanceForHit);
+        hit = TraverseHeightfieldMaxMip(cameraPos, rayDirection, hitT1, elevation, _DistanceForHit);
     }
     else
     {
@@ -871,10 +821,10 @@ void Main (uint3 id : SV_DispatchThreadID)
         
        // col.rgb = elevation / 100.0;
          //col.rgb = mat.baseColor;
-         col.rgb = diffuse + specular;
-         col.rgb *= shadow;
+        //col.rgb = diffuse + specular;
+        //col.rgb *= shadow;
         //col.rgb = (mat.normal + 1.f) * 0.5;
     }
    
-    _Result[id.xy] = float4(col, 1.0);
+    _Result[id.xy] = float4(col.rgb, 1.0);
 }    

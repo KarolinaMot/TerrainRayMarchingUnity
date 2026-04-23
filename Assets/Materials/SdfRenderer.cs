@@ -11,6 +11,7 @@ public class SdfRenderer : MonoBehaviour
     private Camera camera;
     private Light sun;
     private NoiseGeneration noiseGen;
+    private MeshToHeightField meshToHeightfield;
 
     [Header("Ray-marching")]
     public int maxSteps = 100;
@@ -60,6 +61,7 @@ public class SdfRenderer : MonoBehaviour
 
         camera = GetComponent<Camera>();
         noiseGen = GetComponent<NoiseGeneration>();
+        meshToHeightfield = GetComponent<MeshToHeightField>();
         sun = RenderSettings.sun;
 
         for (int i = 0; i < 2; i++)
@@ -86,7 +88,6 @@ public class SdfRenderer : MonoBehaviour
         };
 
         int kernel = marchCS.FindKernel("Main");
-
 
         RenderTextureDescriptor desc = new RenderTextureDescriptor();
         desc.width = camera.pixelWidth;
@@ -122,9 +123,7 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeMatrixParam(marchCS, "_CameraInverseProjection", inverseProjection);
         cmd.SetComputeVectorParam(marchCS, "_WorldSpaceCameraPos", cameraWorldPos);
 
-
         TerrainParameters(kernel, cmd);
-
 
         cmd.DispatchCompute(marchCS, kernel,
                 Mathf.CeilToInt(camera.pixelWidth / 16.0f),
@@ -187,7 +186,7 @@ public class SdfRenderer : MonoBehaviour
 
         cmd.SetComputeIntParam(marchCS, "_MaxSteps", maxSteps);
         cmd.SetComputeFloatParam(marchCS, "_DistanceForHit", distanceForHit);
-        cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMap", noiseGen.heightmap);
+        cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMap", meshToHeightfield.HeightTexture);
 
         Vector4 color = new Vector4(grassColor.r, grassColor.g, grassColor.b, 0.8f);
         Vector4 waterColorRoughness = new Vector4(waterColor.r, waterColor.g, waterColor.b, 0.1f);
