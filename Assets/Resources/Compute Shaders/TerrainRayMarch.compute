@@ -838,8 +838,8 @@ void Main (uint3 id : SV_DispatchThreadID)
             float newShadows = oldShadows + shadow;
             float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
             float shadowRes = newShadows / max(1.f, newShadowSampleNum);
-            //shadow = newShadows / newShadowSampleNum;
-            shadow = shadow;
+            shadow = newShadows / newShadowSampleNum;
+           // shadow = shadow;
             
             _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
         }
