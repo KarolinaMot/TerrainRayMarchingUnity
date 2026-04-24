@@ -194,13 +194,16 @@ bool Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terra
     if (!GetBoundsExit(rOrigin, rDirection, float2(0.0, 0.0), float2(_ChunkSize, _ChunkSize), tEnter, tExitDomain))
         return false;
 
+    if (rOrigin.y < SampleTerrainHeight(rOrigin.xz))
+        return false;
+    
     float maxT = tExitDomain;
     float maxStep = maxT * maxStepPrecision; // allow crossing 2% of total range in one step
     
     for (int i = 0; i < maxSteps && hitT < maxT; i++)
     {
         float3 p = rOrigin + rDirection * hitT;
-        float terrainY = SampleTerrainHeight(p.xz) / 100.f;
+        float terrainY = SampleTerrainHeight(p.xz);
         float h = p.y - terrainY;
 
         if (h < distanceForHit * hitT)
@@ -819,7 +822,7 @@ void Main (uint3 id : SV_DispatchThreadID)
             shadow = Shadow(p + n * _ShdowEpsilon, sunDir, 1.5f);
         }
         
-       // col.rgb = elevation / 100.0;
+       col.rgb = elevation /5000.f;
          //col.rgb = mat.baseColor;
         //col.rgb = diffuse + specular;
         //col.rgb *= shadow;

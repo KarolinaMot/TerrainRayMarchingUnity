@@ -8,7 +8,7 @@ Shader "Hidden/MeshHeightBakeWorldY"
         {
             ZWrite On
             ZTest LEqual
-            Cull Back
+            Cull off
 
             HLSLPROGRAM
             #pragma vertex vert

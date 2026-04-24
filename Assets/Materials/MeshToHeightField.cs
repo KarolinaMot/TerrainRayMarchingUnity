@@ -1,11 +1,12 @@
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
+using static Unity.Burst.Intrinsics.X86.Avx;
 
 public class MeshToHeightField : MonoBehaviour
 {
     [Header("Target")]
-    public Renderer targetRenderer;
+    public Mesh terrain;
 
     [Header("Ouput")]
     public string outputPath;
@@ -31,12 +32,12 @@ public class MeshToHeightField : MonoBehaviour
 
     private void Start()
     {
-        heightBakeShader = Resources.Load<Shader>("Mesh Shaders/MeshToHeightfield");
+        heightBakeShader = Resources.Load<Shader>("Mesh Shaders/TestBakeRed");
         mipCS = Resources.Load<ComputeShader>("Compute Shaders/MipMapGen");
 
-        if (targetRenderer == null)
+        if (terrain == null)
         {
-            Debug.LogError("MeshHeightmapBakerGPU: No targetRenderer assigned.");
+            Debug.LogError("MeshHeightmapBakerGPU: No terrain assigned.");
             return;
         }
 
@@ -46,7 +47,7 @@ public class MeshToHeightField : MonoBehaviour
             return;
         }
 
-        _bounds = targetRenderer.bounds;
+        _bounds = terrain.bounds;
 
         //Set up camera
         {
@@ -94,11 +95,6 @@ public class MeshToHeightField : MonoBehaviour
         BakeHeightmap();
         SaveRenderTextureAsRAW(HeightTexture, outputPath);
 
-    }
-
-    private void Update()
-    {
-        BakeHeightmap();
     }
 
     public void SaveRenderTextureAsRAW(RenderTexture rt, string path)
@@ -193,6 +189,13 @@ public class MeshToHeightField : MonoBehaviour
     [ContextMenu("Bake heightmap")]
     void BakeHeightmap()
     {
+        CommandBuffer cmd = new CommandBuffer();
+        foreach (var r in FindObjectsByType<Renderer>(FindObjectsSortMode.None))
+        {
+            bool included = (_bakeCamera.cullingMask & (1 << r.gameObject.layer)) != 0;
+            if (included)
+                Debug.Log($"Bake sees renderer: {r.name}, layer {r.gameObject.layer}, enabled {r.enabled}");
+        }
 
         //Configure camera
         {
@@ -206,7 +209,7 @@ public class MeshToHeightField : MonoBehaviour
 
             float heightRange = _bounds.size.y + 20f;
             _bakeCamera.nearClipPlane = 0.01f;
-            _bakeCamera.farClipPlane = heightRange;
+            _bakeCamera.farClipPlane = 100000f;
         }
 
         var previousRT = _bakeCamera.targetTexture;
@@ -215,12 +218,39 @@ public class MeshToHeightField : MonoBehaviour
         CameraClearFlags oldFlags = _bakeCamera.clearFlags;
 
         _bakeCamera.targetTexture = HeightTexture;
-        _bakeCamera.cullingMask = bakeLayer;
+        _bakeCamera.cullingMask = bakeLayer.value;
         _bakeCamera.clearFlags = CameraClearFlags.SolidColor;
         _bakeCamera.backgroundColor = new Color(_bounds.min.y, 0, 0, 0);
+        _bakeCamera.orthographic = true;
 
         // Render using replacement shader so the output is raw world height.
-        _bakeCamera.RenderWithShader(heightBakeShader, "");
+        Debug.Log($"BakeCam pos: {_bakeCamera.transform.position}");
+        Debug.Log($"BakeCam forward: {_bakeCamera.transform.forward}");
+        Debug.Log($"Bounds min/max: {_bounds.min} / {_bounds.max}");
+        Debug.Log($"Ortho: {_bakeCamera.orthographic}, size: {_bakeCamera.orthographicSize}");
+        Debug.Log($"Near/Far: {_bakeCamera.nearClipPlane} / {_bakeCamera.farClipPlane}");
+
+        _bakeCamera.cullingMask = ~0;
+        _bakeCamera.clearFlags = CameraClearFlags.SolidColor;
+        _bakeCamera.backgroundColor = Color.black;
+
+        cmd.BeginSample("Heightmap Bake");
+        cmd.SetRenderTarget(HeightTexture);
+        cmd.ClearRenderTarget(true, true, Color.black);
+
+        cmd.SetViewProjectionMatrices(
+        _bakeCamera.worldToCameraMatrix,
+        _bakeCamera.projectionMatrix);
+        cmd.DrawMesh(
+            terrain,
+            Matrix4x4.identity,
+            _heightBakeMaterial,
+            0
+        );
+        cmd.EndSample("Heightmap Bake");
+
+        Graphics.ExecuteCommandBuffer(cmd);
+        cmd.Release();
 
         _bakeCamera.targetTexture = previousRT;
         _bakeCamera.cullingMask = oldMask;
