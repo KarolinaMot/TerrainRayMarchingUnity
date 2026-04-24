@@ -189,13 +189,6 @@ public class MeshToHeightField : MonoBehaviour
     void BakeHeightmap()
     {
         CommandBuffer cmd = new CommandBuffer();
-        foreach (var r in FindObjectsByType<Renderer>(FindObjectsSortMode.None))
-        {
-            bool included = (_bakeCamera.cullingMask & (1 << r.gameObject.layer)) != 0;
-            if (included)
-                Debug.Log($"Bake sees renderer: {r.name}, layer {r.gameObject.layer}, enabled {r.enabled}");
-        }
-
         //Configure camera
         {
             Vector3 center = _bounds.center;
@@ -221,13 +214,6 @@ public class MeshToHeightField : MonoBehaviour
         _bakeCamera.clearFlags = CameraClearFlags.SolidColor;
         _bakeCamera.backgroundColor = new Color(_bounds.min.y, 0, 0, 0);
         _bakeCamera.orthographic = true;
-
-        // Render using replacement shader so the output is raw world height.
-        Debug.Log($"BakeCam pos: {_bakeCamera.transform.position}");
-        Debug.Log($"BakeCam forward: {_bakeCamera.transform.forward}");
-        Debug.Log($"Bounds min/max: {_bounds.min} / {_bounds.max}");
-        Debug.Log($"Ortho: {_bakeCamera.orthographic}, size: {_bakeCamera.orthographicSize}");
-        Debug.Log($"Near/Far: {_bakeCamera.nearClipPlane} / {_bakeCamera.farClipPlane}");
 
         _bakeCamera.cullingMask = ~0;
         _bakeCamera.clearFlags = CameraClearFlags.SolidColor;

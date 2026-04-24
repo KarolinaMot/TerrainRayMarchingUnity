@@ -5,9 +5,12 @@
 #include "../Includes/Noise.hlsl"
 #include "../Includes/BlueNoise.hlsl"
 #include "../Includes/PBR.hlsl"
-#define AMBIENT_INTENSITY 0.4f
+#define AMBIENT_INTENSITY 0.2f
 // Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
+
+uint _Raymarch;
+uint _VisualizeTerrain;
 
 //Ray marching parameters
 int _MaxSteps;
@@ -42,6 +45,7 @@ float _ShadowStepsOptimized;
 float _ShadowHitDistance;
 uint _ShadowSamples;
 float _ShdowEpsilon;
+float _ShdowEpsilonOptimized;
 uint _UseBlueNoise;
 uint _UsePathtracedShadows;
 uint _UseRaymarchOptimization;
@@ -62,9 +66,9 @@ float4x4 _CameraInverseProjection;
 
 float4 BiomeColor(float height)
 {
-    if (height <= 0.001f)
+    if (height <= _OceanDepth)
         return _WaterColorRoughness;
-    if (height < _GrassLevel)
+    else if (height < _GrassLevel)
         return _SandColorRoughness;
     else if (height <= _ForestLevel)
         return _GrassColorRoughness;
@@ -523,7 +527,7 @@ bool TraverseHeightfieldMaxMipShadow(
 
     float2 mip0Dimension = GetMipSize(dimensions.xy, 0);
     float mip0cellDimension = _ChunkSize / float2(mip0Dimension);
-    float e = mip0cellDimension *0.5f;
+    float e = mip0cellDimension *0.2f;
 
     int mip = max((int) dimensions.z - 2, 0);
     uint2 mipSize = GetMipSize(dimensions.xy, mip);
@@ -533,7 +537,7 @@ bool TraverseHeightfieldMaxMipShadow(
     float tRemaining = tExitDomain - tStartGlobal;
 
     float3 rayOriginInGrid = ro + rd * tStartGlobal;
-    rayOriginInGrid = rayOriginInGrid + rd * 40.f;
+    rayOriginInGrid = rayOriginInGrid + rd * _ShdowEpsilonOptimized;
     float tBase = tStartGlobal; // global ray-time of current local origin
 
     float2 deltaT;
@@ -664,19 +668,14 @@ float Shadow(float3 ro, float3 rd, float mint)
             }
             
             res = min(res, degrees(_SunAngularRadius) * (h - _ShadowHitDistance) / max(hitT, 1e-3f));
-           // float stepSize = clamp(h / abs(rd.y + 0.001f) * 0.5f, 60.f, maxStep);
             hitT +=  max(abs(h) * 0.2, 0.01);
 
         }
         res = saturate(res + AMBIENT_INTENSITY);
 
     }
-    
-    //if(blocked)
-    //    return AMBIENT_INTENSITY;
-    
+
     return res;
-  //  return blocked ? AMBIENT_INTENSITY : 1.f;
 }
 
 float MarchedShadows(float3 ro, float3 rd, float mint, float3 normal, uint2 dims, float2 uv, uint seedBase)
@@ -786,11 +785,11 @@ void Main (uint3 id : SV_DispatchThreadID)
 
     bool hit = false;
     
-    if (_UseRaymarchOptimization)
+    if (_Raymarch && _UseRaymarchOptimization)
     {
         hit = TraverseHeightfieldMaxMip(cameraPos, rayDirection, hitT1, elevation, _DistanceForHit);
     }
-    else
+    else if (_Raymarch)
     {
         hit = Raymarch(cameraPos, rayDirection, hitT1, elevation, _MaxSteps, _DistanceForHit, 2e-4f);
     }
@@ -799,7 +798,7 @@ void Main (uint3 id : SV_DispatchThreadID)
     float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
     col.rgb = rtColor;
 
-    if (hit)
+    if (_Raymarch && hit)
     {
         uint2 heightmapDimensions;
         _HeightMap.GetDimensions(heightmapDimensions.x, heightmapDimensions.y);
@@ -839,7 +838,6 @@ void Main (uint3 id : SV_DispatchThreadID)
             float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
             float shadowRes = newShadows / max(1.f, newShadowSampleNum);
             shadow = newShadows / newShadowSampleNum;
-           // shadow = shadow;
             
             _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
         }
@@ -850,7 +848,8 @@ void Main (uint3 id : SV_DispatchThreadID)
         
        //col.rgb = elevation /5000.f;
          //col.rgb = mat.baseColor;
-        col.rgb = diffuse + specular;
+        if(_VisualizeTerrain)
+            col.rgb = diffuse + specular;
         col.rgb *= shadow;
         //col.rgb = (mat.normal + 1.f) * 0.5;
     }

@@ -273,6 +273,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7817cd5ecbb5e284189d7664215d815b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  raymarch: 1
+  visualizeTerrain: 0
   maxSteps: 4096
   maxStepsOptimized: 1000
   distanceForHit: 0.00001
@@ -282,16 +284,17 @@ MonoBehaviour:
   sandColor: {r: 0.754717, g: 0.4717918, b: 0.2171591, a: 0}
   forestColor: {r: 0.047837317, g: 0.23584908, b: 0.094205886, a: 0}
   rockColor: {r: 0.38679248, g: 0.38679248, b: 0.38679248, a: 0}
-  grassLevel: 22.8
-  forestLevel: 62.2
-  rockLevel: 135.5
+  grassLevel: -61.9
+  forestLevel: -18.4
+  rockLevel: 71
   snowLevel: 745.9
-  oceanDepth: 9.28
+  oceanDepth: -2501.15
   sunAngularRadius: 0.58
   shadowSteps: 4196
   shadowStepsOptimized: 600
   shadowSamples: 1
   shdowEpsilon: 0.92
+  shdowEpsilonOptimized: 1.5
   shadowHitDistance: 0
   useBlueNoise: 0
   pathTracedShadows: 1
@@ -656,7 +659,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 839e5eb85092ed249a0389dcda17bd01, type: 3}
       propertyPath: m_LocalPosition.x
-      value: 0
+      value: 1000
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 839e5eb85092ed249a0389dcda17bd01, type: 3}
       propertyPath: m_LocalPosition.y
@@ -664,7 +667,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 839e5eb85092ed249a0389dcda17bd01, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 0
+      value: 1000
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 839e5eb85092ed249a0389dcda17bd01, type: 3}
       propertyPath: m_LocalRotation.w
@@ -695,12 +698,24 @@ PrefabInstance:
       value: 0
       objectReference: {fileID: 0}
     - target: {fileID: -7635826562936255635, guid: 839e5eb85092ed249a0389dcda17bd01, type: 3}
+      propertyPath: m_ReceiveShadows
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -7635826562936255635, guid: 839e5eb85092ed249a0389dcda17bd01, type: 3}
       propertyPath: 'm_Materials.Array.data[0]'
       value: 
       objectReference: {fileID: 2100000, guid: bd9063c81e214d946a6d29d915ee2d52, type: 2}
     - target: {fileID: 919132149155446097, guid: 839e5eb85092ed249a0389dcda17bd01, type: 3}
       propertyPath: m_Name
       value: 8842eed260aa4dad81773d51ca9066fb
+      objectReference: {fileID: 0}
+    - target: {fileID: 1151388028547126963, guid: 839e5eb85092ed249a0389dcda17bd01, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: -1000
+      objectReference: {fileID: 0}
+    - target: {fileID: 1151388028547126963, guid: 839e5eb85092ed249a0389dcda17bd01, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: -1000
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
