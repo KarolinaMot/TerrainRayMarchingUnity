@@ -21,7 +21,6 @@ public class MeshToHeightField : MonoBehaviour
     public Camera BakeCamera => _bakeCamera;
     public Bounds TargetBounds => _bounds;
 
-    [HideInInspector]
     public float max, min;
 
     private Camera _bakeCamera;

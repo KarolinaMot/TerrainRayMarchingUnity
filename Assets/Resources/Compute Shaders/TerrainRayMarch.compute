@@ -32,6 +32,9 @@ float _RockLevel;
 float _SnowLevel;
 float _OceanDepth;
 
+float _MaxHeight;
+float _MinHeight;
+
 float _Metallic;
 float _SunAngularRadius;
 float _ShadowSteps;
@@ -194,25 +197,37 @@ bool Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terra
     if (!GetBoundsExit(rOrigin, rDirection, float2(0.0, 0.0), float2(_ChunkSize, _ChunkSize), tEnter, tExitDomain))
         return false;
 
-    if (rOrigin.y < SampleTerrainHeight(rOrigin.xz))
-        return false;
+    bool belowTerrain = rOrigin.y < SampleTerrainHeight(rOrigin.xz);
     
+    hitT = max(tEnter, 0.0);
     float maxT = tExitDomain;
-    float maxStep = maxT * maxStepPrecision; // allow crossing 2% of total range in one step
-    
+
+    float3 p0 = rOrigin + rDirection * hitT;
+    float terrainY0 = SampleTerrainHeight(p0.xz);
+    float prevH = p0.y - terrainY0;
+
+    // Start below terrain: do not render/hit underside.
+    if (prevH < 0.0)
+        return false;
+
     for (int i = 0; i < maxSteps && hitT < maxT; i++)
     {
         float3 p = rOrigin + rDirection * hitT;
+
         float terrainY = SampleTerrainHeight(p.xz);
         float h = p.y - terrainY;
 
-        if (h < distanceForHit * hitT)
+        // Only accept crossing from above to the terrain surface.
+        if (h <= distanceForHit)
         {
-            terrainHeightAtHit = p.y;
+            terrainHeightAtHit = terrainY;
             return true;
         }
-            
-        hitT += max(abs(h) * 0.2, 0.01);
+
+        float stepSize = max(h * 0.2, 0.01);
+        stepSize = min(stepSize, maxT * maxStepPrecision);
+
+        hitT += stepSize;
     }
 
     return false;
@@ -293,6 +308,17 @@ bool TraverseHeightfieldMaxMip(
 
     float tEnterGlobal, tExitDomain;
     if (!GetBoundsExit(ro, rd, float2(0.0, 0.0), float2(_ChunkSize, _ChunkSize), tEnterGlobal, tExitDomain))
+        return false;
+
+    hitT = max(tEnterGlobal, 0.0);
+    float maxT = tExitDomain;
+
+    float3 p0 = ro + rd * hitT;
+    float terrainY0 = SampleTerrainHeight(p0.xz);
+    float prevH = p0.y - terrainY0;
+
+    // Start below terrain: do not render/hit underside.
+    if (prevH < 0.0)
         return false;
 
     float2 mip0Dimension = GetMipSize(dimensions.xy, 0);
@@ -822,10 +848,10 @@ void Main (uint3 id : SV_DispatchThreadID)
             shadow = Shadow(p + n * _ShdowEpsilon, sunDir, 1.5f);
         }
         
-       col.rgb = elevation /5000.f;
+       //col.rgb = elevation /5000.f;
          //col.rgb = mat.baseColor;
-        //col.rgb = diffuse + specular;
-        //col.rgb *= shadow;
+        col.rgb = diffuse + specular;
+        col.rgb *= shadow;
         //col.rgb = (mat.normal + 1.f) * 0.5;
     }
    

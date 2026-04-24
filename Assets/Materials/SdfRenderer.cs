@@ -219,6 +219,8 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeVectorParam(marchCS, "_ChunkCoord", new Vector2(0f,0f));
         cmd.SetComputeFloatParam(marchCS, "_ShadowSteps", shadowSteps);
         cmd.SetComputeFloatParam(marchCS, "_ShadowStepsOptimized", shadowStepsOptimized);
+        cmd.SetComputeFloatParam(marchCS, "_MaxHeight", meshToHeightfield.max);
+        cmd.SetComputeFloatParam(marchCS, "_MinHeight", meshToHeightfield.min);
         cmd.SetComputeIntParam(marchCS, "_ShadowSamples", (int)shadowSamples);
         cmd.SetComputeIntParam(marchCS, "_UseBlueNoise", useBlueNoise ? 1 : 0);
         cmd.SetComputeIntParam(marchCS, "_UsePathtracedShadows", pathTracedShadows ? 1 : 0);
