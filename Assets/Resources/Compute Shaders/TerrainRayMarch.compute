@@ -250,7 +250,7 @@ float3 GetNormal(float3 p, float t, uint resolution)
 }
 
 [numthreads(16,16,1)]
-void Main (uint3 id : SV_DispatchThreadID)
+void Main(uint3 id : SV_DispatchThreadID)
 {   
     uint2 dims;
     _Result.GetDimensions(dims.x, dims.y);
@@ -280,6 +280,8 @@ void Main (uint3 id : SV_DispatchThreadID)
     float3 rayDirection = normalize(mul((float3x3) _CameraToWorld, rayDirView));
 
     float3 cameraPos = _WorldSpaceCameraPos;
+    
+    float testValue = _HeightMap.SampleLevel(linearClampSampler, uv, 0);
     
     float elevation = 0;
     float3 col = 0;
@@ -359,5 +361,5 @@ void Main (uint3 id : SV_DispatchThreadID)
         //col.rgb = (mat.normal + 1.f) * 0.5;
     }
    
-    _Result[id.xy] = float4(col.rgb, 1.0);
+    _Result[id.xy] = float4(testValue.xxx, 1.0);
 }    

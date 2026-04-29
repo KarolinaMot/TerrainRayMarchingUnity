@@ -12,6 +12,7 @@ public class SdfRenderer : MonoBehaviour
     private Light sun;
     private NoiseGeneration noiseGen;
     private MeshToHeightField meshToHeightfield;
+    private HeightfieldShadowMap heightfieldShadowMap;
 
 
     [Header("Ray-marching")]
@@ -66,6 +67,7 @@ public class SdfRenderer : MonoBehaviour
         camera = GetComponent<Camera>();
         noiseGen = GetComponent<NoiseGeneration>();
         meshToHeightfield = GetComponent<MeshToHeightField>();
+        heightfieldShadowMap = GetComponent<HeightfieldShadowMap>();
         sun = RenderSettings.sun;
 
         for (int i = 0; i < 2; i++)
@@ -190,7 +192,7 @@ public class SdfRenderer : MonoBehaviour
 
         cmd.SetComputeIntParam(marchCS, "_MaxSteps", maxSteps);
         cmd.SetComputeFloatParam(marchCS, "_DistanceForHit", distanceForHit);
-        cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMap", meshToHeightfield.HeightTexture);
+        cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMap", heightfieldShadowMap.shadowMap);
 
         Vector4 color = new Vector4(grassColor.r, grassColor.g, grassColor.b, 0.8f);
         Vector4 waterColorRoughness = new Vector4(waterColor.r, waterColor.g, waterColor.b, 0.1f);

@@ -1,14 +1,73 @@
 // Each #kernel tells which function to compile; you can have many kernels
-#pragma kernel CSMain
+#pragma kernel Main
+#pragma enable_d3d11_debug_symbols
+
+#include "../Includes/Common.hlsl"
+#include "../Includes/RaymarchingHelpers.hlsl"
 
 // Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
-RWTexture2D<float4> Result;
+float _DistanceForHit;
+int _MaxStepsOptimized;
+float _ChunkSize;
+float3 _SunDirection;
+float4x4 _LightClipToWorld;
+float4x4 _WorldToLightClip;
+Texture2D<float> _HeightMap;
 
-[numthreads(8,8,1)]
-void CSMain (uint3 id : SV_DispatchThreadID)
+RWTexture2D<float4> _Result;
+
+void BuildLightRay(float2 uv, out float3 ro, out float3 rd)
 {
-    // TODO: insert actual code here!
+    float2 ndc = uv * 2.0 - 1.0;
 
-    Result[id.xy] = float4(id.x & id.y, (id.x & 15)/15.0, (id.y & 15)/15.0, 0.0);
+    // Near plane in light clip space
+    float4 clipNear = float4(ndc, 0.0, 1.0);
+
+    float4 worldNear = mul(_LightClipToWorld, clipNear);
+    worldNear.xyz /= worldNear.w;
+
+    ro = worldNear.xyz;
+    rd = normalize(_SunDirection);
+}
+
+[numthreads(16, 16, 1)]
+void Main(uint3 id : SV_DispatchThreadID)
+{
+    
+    // TODO: insert actual code here!
+    uint2 dims;
+    _Result.GetDimensions(dims.x, dims.y);
+
+    if (id.x >= dims.x || id.y >= dims.y)
+        return;
+
+    float2 uv = (float2(id.xy) + 0.5) / float2(dims);
+    
+    float3 ro, rd;
+    BuildLightRay(uv, ro, rd);
+
+    float hitT;
+    float hitHeight;
+    
+    bool hit = Raymarch(ro, rd, hitT, hitHeight, _MaxStepsOptimized, _DistanceForHit, 2e-4f, _ChunkSize, _HeightMap, linearClampSampler);
+
+    if (hit)
+    {
+        float3 hitPos = ro + rd * hitT;
+
+        float4 lightClip = mul(_WorldToLightClip, float4(hitPos, 1.0));
+        lightClip.xyz /= lightClip.w;
+
+        float depth = lightClip.z * 0.5 + 0.5;
+
+        _Result[id.xy] = hitHeight/100.f;
+    }
+    else
+    {
+        _Result[id.xy] = rd.y < 0
+    ? float4(0, 1, 0, 1)
+    : float4(1, 0, 0, 1);
+        return;
+    }
 }
