@@ -388,7 +388,7 @@ bool TraverseHeightfieldMaxMipShadow(
 
     InitializeDDA(deltaT, t_y, t_x, cellDimension, rayOriginInGrid.xz, rd.xz);
        
-    for (int i = 0; i < epsilon && t < tRemaining; i++)
+    for (int i = 0; i < maxSteps && t < tRemaining; i++)
     {
         float3 p = rayOriginInGrid + rd * t;
 
