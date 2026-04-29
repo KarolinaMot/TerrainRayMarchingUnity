@@ -26,7 +26,7 @@ public class MeshToHeightField : MonoBehaviour
     private Camera _bakeCamera;
     private RenderTexture _tempHeightTexture;
     private Material _heightBakeMaterial;
-    private Bounds _bounds;
+    public Bounds _bounds;
     private ComputeShader mipCS;
 
     private void Start()

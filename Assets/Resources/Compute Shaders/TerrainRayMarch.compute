@@ -20,6 +20,7 @@ float _DistanceForHit;
 
 //Heightmap and info
 Texture2D<float> _HeightMap;
+Texture2D<float> _ShadowMap;
 float _ChunkSize;
 
 //Material values
@@ -50,6 +51,7 @@ float _ShdowEpsilonOptimized;
 uint _UseBlueNoise;
 uint _UsePathtracedShadows;
 uint _UseRaymarchOptimization;
+float4x4 _WorldToLightClip;
 
 //Other
 float4 _SunDirectionIntensity;
@@ -249,6 +251,29 @@ float3 GetNormal(float3 p, float t, uint resolution)
     return n;
 }
 
+float SampleShadowMap(float3 worldPos, float3 normal, float3 lightDir)
+{
+    float4 lightClip = mul(_WorldToLightClip, float4(worldPos, 1.0));
+    lightClip.xyz /= lightClip.w;
+
+    float2 shadowUV = lightClip.xy * 0.5 + 0.5;
+
+    // try enabling this if vertically flipped
+    // shadowUV.y = 1.0 - shadowUV.y;
+
+    if (shadowUV.x < 0.0 || shadowUV.x > 1.0 ||
+        shadowUV.y < 0.0 || shadowUV.y > 1.0)
+        return 1.0;
+
+    float currentDepth = saturate(lightClip.z);
+    float shadowDepth = _ShadowMap.SampleLevel(linearClampSampler, shadowUV, 0);
+
+    float ndotl = saturate(dot(normal, lightDir));
+    float bias = max(0.0005f, 0.002f * (1.0f - ndotl));
+
+    return currentDepth - bias > shadowDepth ? AMBIENT_INTENSITY : 1.0;
+}
+
 [numthreads(16,16,1)]
 void Main(uint3 id : SV_DispatchThreadID)
 {   
@@ -281,7 +306,7 @@ void Main(uint3 id : SV_DispatchThreadID)
 
     float3 cameraPos = _WorldSpaceCameraPos;
     
-    float testValue = _HeightMap.SampleLevel(linearClampSampler, uv, 0);
+    float testValue = _ShadowMap.SampleLevel(linearClampSampler, uv, 0);
     
     float elevation = 0;
     float3 col = 0;
@@ -350,14 +375,22 @@ void Main(uint3 id : SV_DispatchThreadID)
         }
         else
         {
-            shadow = Shadow(p + n * _ShdowEpsilon, sunDir, 1.5f);
+            sunDir = normalize(_SunDirectionIntensity.xyz);
+
+            shadow = SampleShadowMap(p + n * _ShdowEpsilon, n, sunDir);
+            
+            float4 lc = mul(_WorldToLightClip, float4(p, 1.0));
+            lc.xyz /= lc.w;
+
+            col.rgb = lc.z.xxx / 1.5f;
+           // shadow = Shadow(p + n * _ShdowEpsilon, sunDir, 1.5f);
         }
         
        //col.rgb = elevation /5000.f;
          //col.rgb = mat.baseColor;
-        if(_VisualizeTerrain)
-            col.rgb = diffuse + specular;
-        col.rgb *= shadow;
+        //if(_VisualizeTerrain)
+        //    col.rgb = diffuse + specular;
+        //col.rgb = shadow.xxx;
         //col.rgb = (mat.normal + 1.f) * 0.5;
     }
    

@@ -192,7 +192,7 @@ public class SdfRenderer : MonoBehaviour
 
         cmd.SetComputeIntParam(marchCS, "_MaxSteps", maxSteps);
         cmd.SetComputeFloatParam(marchCS, "_DistanceForHit", distanceForHit);
-        cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMap", heightfieldShadowMap.shadowMap);
+        cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMap", meshToHeightfield.HeightTexture);
 
         Vector4 color = new Vector4(grassColor.r, grassColor.g, grassColor.b, 0.8f);
         Vector4 waterColorRoughness = new Vector4(waterColor.r, waterColor.g, waterColor.b, 0.1f);
@@ -235,7 +235,9 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeIntParam(marchCS, "_UseRaymarchOptimization", optimizeTracing ? 1 : 0);
         cmd.SetComputeIntParam(marchCS, "_VisualizeTerrain", visualizeTerrain ? 1 : 0);
         cmd.SetComputeIntParam(marchCS, "_Raymarch", raymarch ? 1 : 0);
+        cmd.SetComputeMatrixParam(marchCS, "_WorldToLightClip", heightfieldShadowMap.worldToLightClip);
         cmd.SetComputeTextureParam(marchCS, kernel, "_TemporalShadow", temporalShadow[Time.frameCount % 2]);
         cmd.SetComputeTextureParam(marchCS, kernel, "_TemporalShadowPrev", temporalShadow[(Time.frameCount + 1) % 2]);
+        cmd.SetComputeTextureParam(marchCS, kernel, "_ShadowMap", heightfieldShadowMap.shadowMap);
     }
 }

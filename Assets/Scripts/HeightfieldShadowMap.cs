@@ -16,6 +16,7 @@ public class HeightfieldShadowMap : MonoBehaviour
     private ComputeShader shadowMapCS;
     private MeshToHeightField meshToHeightfield;
     private Light sun;
+    public Matrix4x4 worldToLightClip;
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
@@ -41,6 +42,25 @@ public class HeightfieldShadowMap : MonoBehaviour
 
     }
 
+    Vector3[] GetBoundsCorners(Bounds b)
+    {
+        Vector3 min = b.min;
+        Vector3 max = b.max;
+
+        return new Vector3[]
+        {
+        new Vector3(min.x, min.y, min.z),
+        new Vector3(max.x, min.y, min.z),
+        new Vector3(min.x, max.y, min.z),
+        new Vector3(max.x, max.y, min.z),
+
+        new Vector3(min.x, min.y, max.z),
+        new Vector3(max.x, min.y, max.z),
+        new Vector3(min.x, max.y, max.z),
+        new Vector3(max.x, max.y, max.z),
+        };
+    }
+
     // Update is called once per frame
     void Update()
     {
@@ -50,61 +70,59 @@ public class HeightfieldShadowMap : MonoBehaviour
         };
         int kernel = shadowMapCS.FindKernel("Main");
 
-        Vector3 sunDir = sun.transform.forward;
+        // 1. World-space terrain bounds
+        Bounds bounds = meshToHeightfield.TargetBounds;
 
-        Vector3 terrainCenter = new Vector3(
-            mapSize * 0.5f,
-            (meshToHeightfield.min + meshToHeightfield.max) * 0.5f,
-            mapSize * 0.5f
-        );
-        Vector3 center = terrainCenter;
-
+        // 2. Make light view matrix first
         Vector3 lightDir = -sun.transform.forward;
+        Vector3 center = bounds.center;
+        float distance = bounds.size.magnitude;
 
-        float distance = 2000f;
-
-        Vector3 lightPosition = center - lightDir * distance;
-        Quaternion lightRotation = sun.transform.rotation;
+        Vector3 lightPos = center - lightDir * distance;
 
         Matrix4x4 view = Matrix4x4.TRS(
-            lightPosition,
-            lightRotation,
+            lightPos,
+            sun.transform.rotation,
             Vector3.one
         ).inverse;
 
-        float size = mapSize * 0.5f;
+        // 3. Transform bounds corners into light view space
+        Vector3[] corners = GetBoundsCorners(bounds);
+
+        Vector3 lightMin = new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
+        Vector3 lightMax = new Vector3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
+
+        for (int i = 0; i < 8; i++)
+        {
+            Vector3 p = view.MultiplyPoint(corners[i]);
+            lightMin = Vector3.Min(lightMin, p);
+            lightMax = Vector3.Max(lightMax, p);
+        }
+
+        // 4. Build ortho from LIGHT-SPACE bounds
+        float padding = 10f;
 
         Matrix4x4 proj = Matrix4x4.Ortho(
-            -size,
-             size,
-            -size,
-             size,
-             0.1f,
-             5000f
+            lightMin.x - padding,
+            lightMax.x + padding,
+            lightMin.y - padding,
+            lightMax.y + padding,
+            -lightMax.z - padding,
+            -lightMin.z + padding
         );
-
         proj = GL.GetGPUProjectionMatrix(proj, true);
 
-        Matrix4x4 worldToLightClip = proj * view;
+        worldToLightClip = proj * view;
         Matrix4x4 lightClipToWorld = worldToLightClip.inverse;
 
         cmd.SetComputeTextureParam(shadowMapCS, kernel, "_HeightMap", meshToHeightfield.HeightTexture);
         cmd.SetComputeTextureParam(shadowMapCS, kernel, "_Result", shadowMap);
-        cmd.SetComputeVectorParam(shadowMapCS, "_SunDirection", sunDir);
+        cmd.SetComputeVectorParam(shadowMapCS, "_SunDirection", sun.transform.forward);
         cmd.SetComputeFloatParam(shadowMapCS, "_ChunkSize", mapSize);
         cmd.SetComputeFloatParam(shadowMapCS, "_MaxStepsOptimized", maxSteps);
         cmd.SetComputeFloatParam(shadowMapCS, "_DistanceForHit", distanceForHit);
         cmd.SetComputeMatrixParam(shadowMapCS, "_WorldToLightClip", worldToLightClip);
         cmd.SetComputeMatrixParam(shadowMapCS, "_LightClipToWorld", lightClipToWorld);
-
-        Debug.Log("_WorldToLightClip:");
-        Debug.Log(worldToLightClip);
-
-        Debug.Log("_LightClipToWorld:");
-        Debug.Log(lightClipToWorld);
-
-        Debug.Log("Inverse check:");
-        Debug.Log(worldToLightClip * lightClipToWorld);
 
         cmd.DispatchCompute(shadowMapCS, kernel,
         Mathf.CeilToInt(shadowMap.width / 16.0f),

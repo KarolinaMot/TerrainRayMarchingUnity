@@ -61,13 +61,10 @@ void Main(uint3 id : SV_DispatchThreadID)
 
         float depth = lightClip.z * 0.5 + 0.5;
 
-        _Result[id.xy] = hitHeight/100.f;
+        _Result[id.xy] = depth;
     }
     else
     {
-        _Result[id.xy] = rd.y < 0
-    ? float4(0, 1, 0, 1)
-    : float4(1, 0, 0, 1);
-        return;
+        _Result[id.xy] = 1.f;
     }
 }
