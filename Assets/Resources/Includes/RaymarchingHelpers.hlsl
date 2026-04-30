@@ -1,7 +1,7 @@
 #ifndef RMARCH_HELPER
 #define RMARCH_HELPER
 
-float SampleTerrainHeight(float2 xz, float chunkSize, Texture2D<float> heightmap, SamplerState linearClampSampler)
+float SampleTerrainHeight(float2 xz, float2 chunkSize, Texture2D<float> heightmap, SamplerState linearClampSampler)
 {
     float2 uv = xz / chunkSize;
     return heightmap.SampleLevel(linearClampSampler, uv, 0);
@@ -36,27 +36,33 @@ bool GetBoundsExit(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float
 }
 
 
-bool Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terrainHeightAtHit, float maxSteps, float distanceForHit, float maxStepPrecision, float chunkSize, Texture2D<float> heightmap, SamplerState linearClampSampler)
+bool Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terrainHeightAtHit, float maxSteps, float distanceForHit, float maxStepPrecision, float2 chunkSize, Texture2D<float> heightmap, SamplerState linearClampSampler)
 {
     hitT = 0.0;
     terrainHeightAtHit = 0.0;
     
     float tEnter, tExitDomain;
-    if (!GetBoundsExit(rOrigin, rDirection, float2(0.0, 0.0), chunkSize.xx, tEnter, tExitDomain))
+    float boundsPadding = 10.0;
+
+    if (!GetBoundsExit(rOrigin,
+    rDirection,
+    float2(-boundsPadding, -boundsPadding),
+    chunkSize + boundsPadding,
+    tEnter,
+    tExitDomain))
         return false;
 
     bool belowTerrain = rOrigin.y < SampleTerrainHeight(rOrigin.xz, chunkSize, heightmap, linearClampSampler);
     
     hitT = max(tEnter, 0.0);
     float maxT = tExitDomain;
-
     float3 p0 = rOrigin + rDirection * hitT;
     float terrainY0 = SampleTerrainHeight(p0.xz, chunkSize, heightmap, linearClampSampler);
     float prevH = p0.y - terrainY0;
 
     // Start below terrain: do not render/hit underside.
-    if (prevH < 0.0)
-        return false;
+    //if (prevH < 0.0)
+    //    return false;
 
     for (int i = 0; i < maxSteps && hitT < maxT; i++)
     {
@@ -84,7 +90,7 @@ bool Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terra
 
 
 
-void GetTexelWorldPos(float2 mipSizeInPixels, uint2 texel, out float2 worldTexelPos1, out float2 worldTexelPos2, float chunkSize)
+void GetTexelWorldPos(float2 mipSizeInPixels, uint2 texel, out float2 worldTexelPos1, out float2 worldTexelPos2, float2 chunkSize)
 {
     float worldTexelSize = chunkSize / mipSizeInPixels;
     worldTexelPos1 = float2(texel) * worldTexelSize;
@@ -142,7 +148,7 @@ bool TraverseHeightfieldMaxMip(
     float3 rd,
     out float hitT,
     out float hitHeight,
-    float distanceForHit, Texture2D<float> heightmap, float chunkSize, SamplerState linearClampSampler, int maxSteps)
+    float distanceForHit, Texture2D<float> heightmap, float2 chunkSize, SamplerState linearClampSampler, int maxSteps)
 {
     uint3 dimensions;
     heightmap.GetDimensions(0, dimensions.x, dimensions.y, dimensions.z);
@@ -151,7 +157,7 @@ bool TraverseHeightfieldMaxMip(
     hitHeight = 0.0;
 
     float tEnterGlobal, tExitDomain;
-    if (!GetBoundsExit(ro, rd, float2(0.0, 0.0), float2(chunkSize, chunkSize), tEnterGlobal, tExitDomain))
+    if (!GetBoundsExit(ro, rd, float2(0.0, 0.0), chunkSize, tEnterGlobal, tExitDomain))
         return false;
 
     hitT = max(tEnterGlobal, 0.0);
@@ -353,7 +359,7 @@ bool TraverseHeightfieldMaxMipShadow(
     out float hitT,
     out float hitHeight,
     float distanceForHit,
-    inout float softness, Texture2D<float> heightmap, float chunkSize, SamplerState linearClampSampler, int maxSteps, float epsilon)
+    inout float softness, Texture2D<float> heightmap, float2 chunkSize, SamplerState linearClampSampler, int maxSteps, float epsilon)
 {
     uint3 dimensions;
     heightmap.GetDimensions(0, dimensions.x, dimensions.y, dimensions.z);
@@ -362,7 +368,7 @@ bool TraverseHeightfieldMaxMipShadow(
     hitHeight = 0.0;
 
     float tEnterGlobal, tExitDomain;
-    if (!GetBoundsExit(ro, rd, float2(0.0, 0.0), float2(chunkSize, chunkSize), tEnterGlobal, tExitDomain))
+    if (!GetBoundsExit(ro, rd, float2(0.0, 0.0), chunkSize, tEnterGlobal, tExitDomain))
         return false;
 
     float2 mip0Dimension = GetMipSize(dimensions.xy, 0);

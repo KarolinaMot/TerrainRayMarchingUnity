@@ -9,13 +9,26 @@
 // with cs.SetTexture
 float _DistanceForHit;
 int _MaxStepsOptimized;
-float _ChunkSize;
+float2 _ChunkSize;
 float3 _SunDirection;
 float4x4 _LightClipToWorld;
 float4x4 _WorldToLightClip;
 Texture2D<float> _HeightMap;
 
-RWTexture2D<float4> _Result;
+float4 _GrassColorRoughness;
+float4 _WaterColorRoughness;
+float4 _SnowColorRoughness;
+float4 _SandColorRoughness;
+float4 _ForestColorRoughness;
+float4 _RockColorRoughness;
+
+float _GrassLevel;
+float _ForestLevel;
+float _RockLevel;
+float _SnowLevel;
+float _OceanDepth;
+
+RWTexture2D<float> _Result;
 
 void BuildLightRay(float2 uv, out float3 ro, out float3 rd)
 {
@@ -50,7 +63,7 @@ void Main(uint3 id : SV_DispatchThreadID)
     float hitT;
     float hitHeight;
     
-    bool hit = Raymarch(ro, rd, hitT, hitHeight, _MaxStepsOptimized, _DistanceForHit, 2e-4f, _ChunkSize, _HeightMap, linearClampSampler);
+    bool hit = Raymarch(ro, rd, hitT, hitHeight, _MaxStepsOptimized, _DistanceForHit, 5e-1f, _ChunkSize, _HeightMap, linearClampSampler);
 
     if (hit)
     {
@@ -59,8 +72,7 @@ void Main(uint3 id : SV_DispatchThreadID)
         float4 lightClip = mul(_WorldToLightClip, float4(hitPos, 1.0));
         lightClip.xyz /= lightClip.w;
 
-        float depth = lightClip.z * 0.5 + 0.5;
-
+        float depth = saturate(lightClip.z);
         _Result[id.xy] = depth;
     }
     else

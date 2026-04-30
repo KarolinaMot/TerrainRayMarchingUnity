@@ -9,12 +9,15 @@ public class HeightfieldShadowMap : MonoBehaviour
 {
     public int shadowMapResolution;
     public float distanceForHit;
+    public float paddingXY = 10f;
+    public float paddingZ = 10f;
     public int maxSteps;
-    public float mapSize;
+    public Vector2 mapSize;
 
     public RenderTexture shadowMap;
     private ComputeShader shadowMapCS;
     private MeshToHeightField meshToHeightfield;
+    private SdfRenderer sdfRenderer;
     private Light sun;
     public Matrix4x4 worldToLightClip;
 
@@ -37,9 +40,11 @@ public class HeightfieldShadowMap : MonoBehaviour
 
         shadowMapCS = Resources.Load<ComputeShader>("Compute Shaders/HeightmapShadowmap");
         meshToHeightfield = GetComponent<MeshToHeightField>();
+        sdfRenderer = GetComponent<SdfRenderer>();
         sun = RenderSettings.sun;
-
-
+        mapSize.x = meshToHeightfield.TargetBounds.size.x;
+        mapSize.y = meshToHeightfield.TargetBounds.size.z;
+        DispatchShadowmap();
     }
 
     Vector3[] GetBoundsCorners(Bounds b)
@@ -61,8 +66,7 @@ public class HeightfieldShadowMap : MonoBehaviour
         };
     }
 
-    // Update is called once per frame
-    void Update()
+    void DispatchShadowmap()
     {
         CommandBuffer cmd = new CommandBuffer()
         {
@@ -74,7 +78,7 @@ public class HeightfieldShadowMap : MonoBehaviour
         Bounds bounds = meshToHeightfield.TargetBounds;
 
         // 2. Make light view matrix first
-        Vector3 lightDir = -sun.transform.forward;
+        Vector3 lightDir = sun.transform.forward;
         Vector3 center = bounds.center;
         float distance = bounds.size.magnitude;
 
@@ -99,26 +103,23 @@ public class HeightfieldShadowMap : MonoBehaviour
             lightMax = Vector3.Max(lightMax, p);
         }
 
-        // 4. Build ortho from LIGHT-SPACE bounds
-        float padding = 10f;
-
         Matrix4x4 proj = Matrix4x4.Ortho(
-            lightMin.x - padding,
-            lightMax.x + padding,
-            lightMin.y - padding,
-            lightMax.y + padding,
-            -lightMax.z - padding,
-            -lightMin.z + padding
+            lightMin.x - paddingXY,
+            lightMax.x + paddingXY,
+            lightMin.y - paddingXY,
+            lightMax.y + paddingXY,
+            -lightMax.z - paddingZ,
+            -lightMin.z + paddingZ
         );
-        proj = GL.GetGPUProjectionMatrix(proj, true);
+
+        proj = GL.GetGPUProjectionMatrix(proj, false);
 
         worldToLightClip = proj * view;
         Matrix4x4 lightClipToWorld = worldToLightClip.inverse;
-
         cmd.SetComputeTextureParam(shadowMapCS, kernel, "_HeightMap", meshToHeightfield.HeightTexture);
         cmd.SetComputeTextureParam(shadowMapCS, kernel, "_Result", shadowMap);
-        cmd.SetComputeVectorParam(shadowMapCS, "_SunDirection", sun.transform.forward);
-        cmd.SetComputeFloatParam(shadowMapCS, "_ChunkSize", mapSize);
+        cmd.SetComputeVectorParam(shadowMapCS, "_SunDirection", lightDir);
+        cmd.SetComputeVectorParam(shadowMapCS, "_ChunkSize", mapSize);
         cmd.SetComputeFloatParam(shadowMapCS, "_MaxStepsOptimized", maxSteps);
         cmd.SetComputeFloatParam(shadowMapCS, "_DistanceForHit", distanceForHit);
         cmd.SetComputeMatrixParam(shadowMapCS, "_WorldToLightClip", worldToLightClip);
@@ -131,5 +132,10 @@ public class HeightfieldShadowMap : MonoBehaviour
 
         Graphics.ExecuteCommandBuffer(cmd);
         cmd.Release();
+
+    }
+    // Update is called once per frame
+    void Update()
+    {
     }
 }

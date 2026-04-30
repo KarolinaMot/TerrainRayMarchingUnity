@@ -7,7 +7,7 @@
 // with cs.SetTexture
 RWTexture2D<float> _HeightMap;
 uint _ChunkResolution;
-float _ChunkSize;
+float2 _ChunkSize;
 float2 _ChunkCoord;
 
 

@@ -8,7 +8,7 @@ using static Unity.Burst.Intrinsics.X86.Avx;
 public class NoiseGeneration : MonoBehaviour
 {
     public int verticesPerChunk = 128;
-    public float chunkSize = 128;
+    public Vector2 chunkSize = new Vector2(128f, 128f);
     private ComputeShader noiseCS;
     private ComputeShader mipCS;
     private Camera camera;
@@ -157,7 +157,7 @@ public class NoiseGeneration : MonoBehaviour
         noiseCS.SetTexture(kernel, "_HeightMap", heightmap);
 
         noiseCS.SetInt("_ChunkResolution", verticesPerChunk);
-        noiseCS.SetFloat("_ChunkSize", chunkSize);
+        noiseCS.SetVector("_ChunkSize", chunkSize);
         noiseCS.SetVector("_ChunkCoord", new Vector4(0f, 0f, 0f, 0f));
 
         noiseCS.SetFloat("_CellScaling", noiseCellScaling);

@@ -221,7 +221,7 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeFloatParam(marchCS, "_SunAngularRadius", sunAngularRadius);
         cmd.SetComputeFloatParam(marchCS, "_ShdowEpsilon", shdowEpsilon);
         cmd.SetComputeFloatParam(marchCS, "_ShdowEpsilonOptimized", shdowEpsilonOptimized);
-        cmd.SetComputeFloatParam(marchCS, "_ChunkSize", noiseGen.chunkSize);
+        cmd.SetComputeVectorParam(marchCS, "_ChunkSize", noiseGen.chunkSize);
         cmd.SetComputeFloatParam(marchCS, "_ShadowHitDistance", shadowHitDistance);
         cmd.SetComputeVectorParam(marchCS, "_ChunkCoord", new Vector2(0f,0f));
         cmd.SetComputeFloatParam(marchCS, "_ShadowSteps", shadowSteps);
