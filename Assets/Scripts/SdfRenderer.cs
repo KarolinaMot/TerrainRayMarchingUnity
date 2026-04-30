@@ -62,6 +62,9 @@ public class SdfRenderer : MonoBehaviour
 
     private void Start()
     {
+        Camera cam = Camera.main;
+        cam.depthTextureMode |= DepthTextureMode.Depth;
+
         marchCS = Resources.Load<ComputeShader>("Compute Shaders/TerrainRayMarch");
 
         camera = GetComponent<Camera>();
@@ -79,6 +82,7 @@ public class SdfRenderer : MonoBehaviour
             temporalShadow[i].filterMode = FilterMode.Bilinear;
             temporalShadow[i].Create();
         }
+
     }
     private void Update()
     {
@@ -239,5 +243,11 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeTextureParam(marchCS, kernel, "_TemporalShadow", temporalShadow[Time.frameCount % 2]);
         cmd.SetComputeTextureParam(marchCS, kernel, "_TemporalShadowPrev", temporalShadow[(Time.frameCount + 1) % 2]);
         cmd.SetComputeTextureParam(marchCS, kernel, "_ShadowMap", heightfieldShadowMap.shadowMap);
+        cmd.SetComputeTextureParam(
+            marchCS,
+            kernel,
+            "_CameraDepthTexture",
+            BuiltinRenderTextureType.Depth
+        );
     }
 }

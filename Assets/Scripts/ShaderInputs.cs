@@ -1,4 +1,6 @@
 using UnityEngine;
+using UnityEngine.Rendering;
+using static Unity.Burst.Intrinsics.X86.Avx;
 using static UnityEngine.Rendering.HableCurve;
 
 public class ShaderInputs : MonoBehaviour
@@ -18,6 +20,7 @@ public class ShaderInputs : MonoBehaviour
         Shader.SetGlobalFloat("_DeltaTime", Time.deltaTime);
         Shader.SetGlobalFloat("_DSimTime", Time.time);
         Shader.SetGlobalTexture("_BlueNoise64", blueNoise);
+
 
     }
 }

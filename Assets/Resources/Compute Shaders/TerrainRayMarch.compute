@@ -21,6 +21,7 @@ float _DistanceForHit;
 //Heightmap and info
 Texture2D<float> _HeightMap;
 Texture2D<float> _ShadowMap;
+Texture2D<float> _CameraDepthTexture;
 float2 _ChunkSize;
 
 //Material values
@@ -250,7 +251,7 @@ float3 GetNormal(float3 p, float t, uint resolution)
     return n;
 }
 
-float SampleShadowMap(float3 worldPos, float3 normal, float3 lightDir)
+float SampleShadowMap(float3 worldPos, float3 lightDir)
 {
     float2 uv = worldPos.xz / _ChunkSize;
 
@@ -259,6 +260,24 @@ float SampleShadowMap(float3 worldPos, float3 normal, float3 lightDir)
         return 1.0;
 
     return _ShadowMap.SampleLevel(linearClampSampler, uv, 0) ? AMBIENT_INTENSITY : 1.f;
+}
+
+float3 ReconstructWorldPos(uint2 pixel, uint2 dims)
+{
+    float2 uv = (float2(pixel) + 0.5) / float2(dims);
+
+    float2 ndc = uv * 2.0 - 1.0;
+    ndc.y = -ndc.y; // Unity screen UV to clip Y
+
+    float depth = _CameraDepthTexture.Load(int3(pixel, 0));
+
+    float4 clip = float4(ndc, depth, 1.0);
+
+    float4 view = mul(_CameraInverseProjection, clip);
+    view /= view.w;
+
+    float4 world = mul(_CameraToWorld, float4(view.xyz, 1.0));
+    return world.xyz;
 }
 
 [numthreads(16,16,1)]
@@ -306,84 +325,90 @@ void Main(uint3 id : SV_DispatchThreadID)
 
     bool hit = false;
     
-    if (_Raymarch && _UseRaymarchOptimization)
-    {
-        hit = TraverseHeightfieldMaxMip(cameraPos, rayDirection, hitT1, elevation, _DistanceForHit, _HeightMap, _ChunkSize, linearClampSampler, _MaxStepsOptimized);
-    }
-    else if (_Raymarch)
-    {
-        hit = Raymarch(cameraPos, rayDirection, hitT1, elevation, _MaxSteps, _DistanceForHit, 2e-4f, _ChunkSize, _HeightMap, linearClampSampler);
-    }
+    float3 sunDir = normalize(_SunDirectionIntensity.xyz);
+    float3 worldPos = ReconstructWorldPos(id.xy, dims);
+    
+    shadow = SampleShadowMap(worldPos, sunDir);
     
     uint flippedY = dims.y - 1 - id.y;
     float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
     col.rgb = rtColor;
+    col.rgb *= shadow;
 
-    if (_Raymarch && hit)
-    {
-        uint2 heightmapDimensions;
-        _HeightMap.GetDimensions(heightmapDimensions.x, heightmapDimensions.y);
-        float3 p = cameraPos + rayDirection * hitT1;
-        float3 n = GetNormal(p, hitT1, heightmapDimensions.x);
-        float4 biomeValue = BiomeColor(elevation);
-        
-        PBRMaterial mat;
-        mat.baseColor = biomeValue.rgb;
-        mat.roughness = biomeValue.a;
-        mat.metallic = _Metallic;
-        mat.normal = n;
-        mat.F0 = float3(0.02, 0.02, 0.02);
-        mat.F0 = lerp(mat.F0, mat.baseColor.rgb, mat.metallic);
-        mat.diffuse = lerp(mat.baseColor.rgb, float3(0.0, 0.0, 0.0), mat.metallic);
-        
-        float3 viewDirection = normalize(cameraPos - p);
-        float3 sunDir = -normalize(_SunDirectionIntensity.xyz);
-        
-        float3 diffuse = 0.f;
-        float3 specular = 0.f;
-        GetBRDF(mat, viewDirection, sunDir, _SunColor, _SunDirectionIntensity.w, 1.f, diffuse, specular);
-        
-        float3 ambientColor = 1.f;
-        GetBRDF(mat, viewDirection, viewDirection, ambientColor, AMBIENT_INTENSITY, 1.f, diffuse, specular);
-        
-        if (_UsePathtracedShadows)
-        {
-            float3 rOrigin = p + sunDir * 1.5f + float3(0, 1.0f, 0);
-            shadow = MarchedShadows(rOrigin, sunDir, 1.f, n, dims, uv,
-              Hash(id.x + id.y * dims.x) + _FrameIndex);
+    //float2 tempShadows = _TemporalShadowPrev.Load(id);
+    //float oldShadows = tempShadows.r;
+    //float oldShadowSampleNum = tempShadows.g;
+    //float newShadows = oldShadows + shadow;
+    //float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
+    //float shadowRes = newShadows / max(1.f, newShadowSampleNum);
+    //shadow = newShadows / newShadowSampleNum;
             
-            float2 tempShadows = _TemporalShadowPrev.Load(id);
-            float oldShadows = tempShadows.r;
-            float oldShadowSampleNum = tempShadows.g;
-            float newShadows = oldShadows + shadow;
-            float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
-            float shadowRes = newShadows / max(1.f, newShadowSampleNum);
-            shadow = newShadows / newShadowSampleNum;
-            
-            _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
-        }
-        else
-        {
-            sunDir = normalize(_SunDirectionIntensity.xyz);
+    //_TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
 
-            shadow = SampleShadowMap(p + n * _ShdowEpsilon, n, sunDir);
-            float2 tempShadows = _TemporalShadowPrev.Load(id);
-            float oldShadows = tempShadows.r;
-            float oldShadowSampleNum = tempShadows.g;
-            float newShadows = oldShadows + shadow;
-            float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
-            float shadowRes = newShadows / max(1.f, newShadowSampleNum);
-            shadow = newShadows / newShadowSampleNum;
-            
-            _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
+    
+    //if (_Raymarch && _UseRaymarchOptimization)
+    //{
+    //    hit = TraverseHeightfieldMaxMip(cameraPos, rayDirection, hitT1, elevation, _DistanceForHit, _HeightMap, _ChunkSize, linearClampSampler, _MaxStepsOptimized);
+    //}
+    //else if (_Raymarch)
+    //{
+    //    hit = Raymarch(cameraPos, rayDirection, hitT1, elevation, _MaxSteps, _DistanceForHit, 2e-4f, _ChunkSize, _HeightMap, linearClampSampler);
+    //}
+    
 
-        }
+    //if (_Raymarch && hit)
+    //{
+    //    uint2 heightmapDimensions;
+    //    _HeightMap.GetDimensions(heightmapDimensions.x, heightmapDimensions.y);
+    //    float3 p = cameraPos + rayDirection * hitT1;
+    //    float3 n = GetNormal(p, hitT1, heightmapDimensions.x);
+    //    float4 biomeValue = BiomeColor(elevation);
         
-        if (_VisualizeTerrain)
-            col.rgb = diffuse + specular;
-        col.rgb *= shadow.xxx;
-    }
+    //    PBRMaterial mat;
+    //    mat.baseColor = biomeValue.rgb;
+    //    mat.roughness = biomeValue.a;
+    //    mat.metallic = _Metallic;
+    //    mat.normal = n;
+    //    mat.F0 = float3(0.02, 0.02, 0.02);
+    //    mat.F0 = lerp(mat.F0, mat.baseColor.rgb, mat.metallic);
+    //    mat.diffuse = lerp(mat.baseColor.rgb, float3(0.0, 0.0, 0.0), mat.metallic);
+        
+    //    float3 viewDirection = normalize(cameraPos - p);
+    //    float3 sunDir = -normalize(_SunDirectionIntensity.xyz);
+        
+    //    float3 diffuse = 0.f;
+    //    float3 specular = 0.f;
+    //    GetBRDF(mat, viewDirection, sunDir, _SunColor, _SunDirectionIntensity.w, 1.f, diffuse, specular);
+        
+    //    float3 ambientColor = 1.f;
+    //    GetBRDF(mat, viewDirection, viewDirection, ambientColor, AMBIENT_INTENSITY, 1.f, diffuse, specular);
+        
+    //    if (_UsePathtracedShadows)
+    //    {
+    //        float3 rOrigin = p + sunDir * 1.5f + float3(0, 1.0f, 0);
+    //        shadow = MarchedShadows(rOrigin, sunDir, 1.f, n, dims, uv,
+    //          Hash(id.x + id.y * dims.x) + _FrameIndex);
+            
+    //        float2 tempShadows = _TemporalShadowPrev.Load(id);
+    //        float oldShadows = tempShadows.r;
+    //        float oldShadowSampleNum = tempShadows.g;
+    //        float newShadows = oldShadows + shadow;
+    //        float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
+    //        float shadowRes = newShadows / max(1.f, newShadowSampleNum);
+    //        shadow = newShadows / newShadowSampleNum;
+            
+    //        _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
+    //    }
+    //    else
+    //    {
+
+    //    }
+        
+    //    if (_VisualizeTerrain)
+    //        col.rgb = diffuse + specular;
+    //    col.rgb *= shadow.xxx;
+    //}
    
+   // _Result[id.xy] = float4(shadow.xxx, 1.0);
     _Result[id.xy] = float4(col.rgb, 1.0);
-    //_Result[id.xy] = float4(col.rgb, 1.0);
 }    
