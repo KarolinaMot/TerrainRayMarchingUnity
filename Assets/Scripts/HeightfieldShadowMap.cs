@@ -11,6 +11,7 @@ public class HeightfieldShadowMap : MonoBehaviour
     public float distanceForHit;
     public float paddingXY = 10f;
     public float paddingZ = 10f;
+    public float sunAngularRadius = 0.2f;
     public int maxSteps;
     public Vector2 mapSize;
 
@@ -122,6 +123,7 @@ public class HeightfieldShadowMap : MonoBehaviour
         cmd.SetComputeVectorParam(shadowMapCS, "_ChunkSize", mapSize);
         cmd.SetComputeFloatParam(shadowMapCS, "_MaxStepsOptimized", maxSteps);
         cmd.SetComputeFloatParam(shadowMapCS, "_DistanceForHit", distanceForHit);
+        cmd.SetComputeFloatParam(shadowMapCS, "_SunAngularRadius", sunAngularRadius);
         cmd.SetComputeMatrixParam(shadowMapCS, "_WorldToLightClip", worldToLightClip);
         cmd.SetComputeMatrixParam(shadowMapCS, "_LightClipToWorld", lightClipToWorld);
 
@@ -137,5 +139,7 @@ public class HeightfieldShadowMap : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
+        DispatchShadowmap();
+
     }
 }

@@ -305,6 +305,7 @@ void Main(uint3 id : SV_DispatchThreadID)
     
     float2 shadowUV = uv;
     shadowUV.y = 1 - shadowUV.y;
+    float testValue = _ShadowMap.SampleLevel(linearClampSampler, shadowUV, 0.f);
     
     float elevation = 0;
     float3 col = 0;
@@ -376,7 +377,16 @@ void Main(uint3 id : SV_DispatchThreadID)
             sunDir = normalize(_SunDirectionIntensity.xyz);
 
             shadow = SampleShadowMap(p + n * _ShdowEpsilon, n, sunDir);
+            float2 tempShadows = _TemporalShadowPrev.Load(id);
+            float oldShadows = tempShadows.r;
+            float oldShadowSampleNum = tempShadows.g;
+            float newShadows = oldShadows + shadow;
+            float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
+            float shadowRes = newShadows / max(1.f, newShadowSampleNum);
+            shadow = newShadows / newShadowSampleNum;
             
+            _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
+
         }
         
         if (_VisualizeTerrain)
@@ -384,5 +394,6 @@ void Main(uint3 id : SV_DispatchThreadID)
         col.rgb *= shadow.xxx;
     }
    
+    //_Result[id.xy] = float4(testValue.xxx, 1.0);
     _Result[id.xy] = float4(col.rgb, 1.0);
 }    

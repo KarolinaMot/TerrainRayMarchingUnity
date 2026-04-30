@@ -14,20 +14,9 @@ float3 _SunDirection;
 float4x4 _LightClipToWorld;
 float4x4 _WorldToLightClip;
 Texture2D<float> _HeightMap;
+static const float sPi = 3.14159265359;
 
-float4 _GrassColorRoughness;
-float4 _WaterColorRoughness;
-float4 _SnowColorRoughness;
-float4 _SandColorRoughness;
-float4 _ForestColorRoughness;
-float4 _RockColorRoughness;
-
-float _GrassLevel;
-float _ForestLevel;
-float _RockLevel;
-float _SnowLevel;
-float _OceanDepth;
-
+float _SunAngularRadius;
 RWTexture2D<float> _Result;
 
 void BuildLightRay(float2 uv, out float3 ro, out float3 rd)
@@ -43,6 +32,73 @@ void BuildLightRay(float2 uv, out float3 ro, out float3 rd)
     ro = worldNear.xyz;
     rd = normalize(_SunDirection);
 }
+
+uint Hash(uint x)
+{
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return x;
+}
+
+float Rand(inout uint seed)
+{
+    seed = Hash(seed);
+    // Take lower 24 bits and normalize
+    return (seed & 0x00FFFFFFu) / 16777216.0f; // 2^24
+}
+
+void MakeOrthonormalBasis(float3 n, out float3 t, out float3 b)
+{
+    float3 up = (abs(n.z) < 0.999f) ? float3(0, 0, 1) : float3(0, 1, 0);
+    t = normalize(cross(up, n));
+    b = cross(n, t);
+}
+
+float3 SampleConeDirection(float3 axis, float cosMax, float2 u)
+{
+    float cosTheta = lerp(cosMax, 1.0f, u.x);
+    float sinTheta = sqrt(max(0.0f, 1.0f - cosTheta * cosTheta));
+    float phi = 2.0f * sPi * u.y;
+
+    float3 t, b;
+    MakeOrthonormalBasis(axis, t, b);
+
+    return normalize(t * (cos(phi) * sinTheta) + b * (sin(phi) * sinTheta) + axis * cosTheta);
+}
+
+bool MarchedShadows(float3 ro, float3 rd, uint seedBase, out float hitT)
+{
+    float visibility = 0.0f;
+
+    rd = normalize(rd);
+
+    float3 rayStart = ro;
+    float sunHeight = saturate(rd.y);
+    float cosMax = cos(max(radians(_SunAngularRadius), 1e-6f));
+    float2 u;
+
+
+    uint seed = seedBase + 9781u;
+    u = float2(Rand(seed), Rand(seed));
+        
+    float3 lightDir = SampleConeDirection(rd, cosMax, u);
+
+    hitT = 1.f;
+    float heightTerrain = 0.f;
+    bool blocked = false;
+        
+    float res = 1.f;
+        
+    //if (_UseRaymarchOptimization)
+    //    blocked = TraverseHeightfieldMaxMipShadow(ro, lightDir, t, heightTerrain, _ShadowHitDistance, res, _HeightMap, _ChunkSize, linearClampSampler, _ShadowStepsOptimized, _ShdowEpsilonOptimized);
+    //else
+    blocked = Raymarch(ro, lightDir, hitT, heightTerrain, _MaxStepsOptimized, _DistanceForHit, 1e-2f, _ChunkSize, _HeightMap, linearClampSampler);
+    return blocked;
+}
+
 
 [numthreads(16, 16, 1)]
 void Main(uint3 id : SV_DispatchThreadID)
@@ -61,9 +117,9 @@ void Main(uint3 id : SV_DispatchThreadID)
     BuildLightRay(uv, ro, rd);
 
     float hitT;
-    float hitHeight;
     
-    bool hit = Raymarch(ro, rd, hitT, hitHeight, _MaxStepsOptimized, _DistanceForHit, 5e-1f, _ChunkSize, _HeightMap, linearClampSampler);
+    //bool hit = Raymarch(ro, rd, hitT, hitHeight, _MaxStepsOptimized, _DistanceForHit, 5e-1f, _ChunkSize, _HeightMap, linearClampSampler);
+    bool hit = MarchedShadows(ro, rd, Hash(id.x + id.y * dims.x) + _FrameIndex, hitT);
 
     if (hit)
     {
