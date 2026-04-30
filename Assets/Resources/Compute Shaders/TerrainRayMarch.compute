@@ -51,7 +51,6 @@ float _ShdowEpsilonOptimized;
 uint _UseBlueNoise;
 uint _UsePathtracedShadows;
 uint _UseRaymarchOptimization;
-float4x4 _WorldToLightClip;
 
 //Other
 float4 _SunDirectionIntensity;
@@ -253,22 +252,13 @@ float3 GetNormal(float3 p, float t, uint resolution)
 
 float SampleShadowMap(float3 worldPos, float3 normal, float3 lightDir)
 {
-    float4 lightClip = mul(_WorldToLightClip, float4(worldPos, 1.0));
-    lightClip.xyz /= lightClip.w;
+    float2 uv = worldPos.xz / _ChunkSize;
 
-    float2 shadowUV = lightClip.xy * 0.5 + 0.5;
-
-    if (shadowUV.x < 0.0 || shadowUV.x > 1.0 ||
-        shadowUV.y < 0.0 || shadowUV.y > 1.0)
+    if (uv.x < 0.0 || uv.x > 1.0 ||
+        uv.y < 0.0 || uv.y > 1.0)
         return 1.0;
 
-    float currentDepth = saturate(lightClip.z);
-    float shadowDepth = _ShadowMap.SampleLevel(linearClampSampler, shadowUV, 0);
-
-    float ndotl = saturate(dot(normal, lightDir));
-    float bias = max(0.0005f, 0.002f * (1.0f - ndotl));
-
-    return currentDepth - bias > shadowDepth ? AMBIENT_INTENSITY : 1.0;
+    return _ShadowMap.SampleLevel(linearClampSampler, uv, 0) ? AMBIENT_INTENSITY : 1.f;
 }
 
 [numthreads(16,16,1)]
@@ -394,6 +384,6 @@ void Main(uint3 id : SV_DispatchThreadID)
         col.rgb *= shadow.xxx;
     }
    
-    //_Result[id.xy] = float4(testValue.xxx, 1.0);
     _Result[id.xy] = float4(col.rgb, 1.0);
+    //_Result[id.xy] = float4(col.rgb, 1.0);
 }    
