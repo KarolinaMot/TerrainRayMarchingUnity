@@ -120,8 +120,6 @@ public class SdfRenderer : MonoBehaviour
         camera.RemoveCommandBuffers(CameraEvent.BeforeImageEffects);
         camera.AddCommandBuffer(CameraEvent.BeforeImageEffects, cmd);
     }
-
-
     private void TerrainParameters(int kernel, CommandBuffer cmd)
     {
 
@@ -153,10 +151,10 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeFloatParam(marchCS, "_OceanDepth", oceanDepth);
         cmd.SetComputeVectorParam(marchCS, "_SunDirectionIntensity", sunDirIntensity);
         cmd.SetComputeVectorParam(marchCS, "_SunColor", sunColor);
-        cmd.SetComputeVectorParam(marchCS, "_ChunkSize", new Vector2(meshToHeightfield.TargetBounds.size.x * terrainTransform.localScale.x, meshToHeightfield.TargetBounds.size.z * terrainTransform.localScale.z) );
+        cmd.SetComputeVectorParam(marchCS, "_ChunkSize", new Vector2(meshToHeightfield.TargetBounds.size.x * terrainTransform.lossyScale.x, meshToHeightfield.TargetBounds.size.z * terrainTransform.lossyScale.z) );
         cmd.SetComputeFloatParam(marchCS, "_MaxHeight", meshToHeightfield.max);
         cmd.SetComputeFloatParam(marchCS, "_MinHeight", meshToHeightfield.min);
-        cmd.SetComputeVectorParam(marchCS, "_Scale", terrainTransform.localScale);
+        cmd.SetComputeVectorParam(marchCS, "_Scale", terrainTransform.lossyScale);
         cmd.SetComputeVectorParam(marchCS, "_Offset", terrainTransform.position);
         cmd.SetComputeIntParam(marchCS, "_UseRaymarchOptimization", optimizeTracing ? 1 : 0);
         cmd.SetComputeIntParam(marchCS, "_VisualizeTerrain", visualizeTerrain ? 1 : 0);
