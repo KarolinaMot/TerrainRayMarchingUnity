@@ -19,7 +19,6 @@ public class HeightfieldShadowMap : MonoBehaviour
     public RenderTexture shadowMap;
     private ComputeShader shadowMapCS;
     private MeshToHeightField meshToHeightfield;
-    private SdfRenderer sdfRenderer;
     private Light sun;
     public Matrix4x4 worldToLightClip;
     private RenderTexture[] temporalShadow = new RenderTexture[2];
@@ -63,19 +62,10 @@ public class HeightfieldShadowMap : MonoBehaviour
 
         shadowMapCS = Resources.Load<ComputeShader>("Compute Shaders/BakeShadows");
         meshToHeightfield = GetComponent<MeshToHeightField>();
-        sdfRenderer = GetComponent<SdfRenderer>();
         sun = RenderSettings.sun;
-        mapSize.x = meshToHeightfield.TargetBounds.size.x;
-        mapSize.y = meshToHeightfield.TargetBounds.size.z;
+        //mapSize.x = meshToHeightfield.TargetBounds.size.x;
+        //mapSize.y = meshToHeightfield.TargetBounds.size.z;
 
-        //CommandBuffer cmd = new CommandBuffer()
-        //{
-        //    name = "ShadowMap creation"
-        //};
-
-        //DispatchShadowmap(cmd);
-
-        //cmd.Release();
     }
 
     private void ClearTemporal(CommandBuffer cmd)
@@ -115,17 +105,17 @@ public class HeightfieldShadowMap : MonoBehaviour
         int kernel = shadowMapCS.FindKernel("Main");
 
         // 1. World-space terrain bounds
-        Bounds bounds = meshToHeightfield.TargetBounds;
+        //Bounds bounds = meshToHeightfield.TargetBounds;
 
         // 2. Make light view matrix first
         Vector3 lightDir = sun.transform.forward;
 
         Matrix4x4 lightClipToWorld = worldToLightClip.inverse;
-        cmd.SetComputeTextureParam(shadowMapCS, kernel, "_HeightMap", meshToHeightfield.HeightTexture);
+       // cmd.SetComputeTextureParam(shadowMapCS, kernel, "_HeightMap", meshToHeightfield.HeightTexture);
         cmd.SetComputeTextureParam(shadowMapCS, kernel, "_Result", shadowMap);
         cmd.SetComputeVectorParam(shadowMapCS, "_SunDirection", lightDir);
         cmd.SetComputeVectorParam(shadowMapCS, "_ChunkSize", mapSize);
-        cmd.SetComputeVectorParam(shadowMapCS, "_ChunkOrigin", bounds.min);
+        //cmd.SetComputeVectorParam(shadowMapCS, "_ChunkOrigin", bounds.min);
         cmd.SetComputeIntParam(shadowMapCS, "_MaxSteps", maxSteps);
         cmd.SetComputeFloatParam(shadowMapCS, "_DistanceForHit", distanceForHit);
         cmd.SetComputeFloatParam(shadowMapCS, "_SunAngularRadius", sunAngularRadius);
