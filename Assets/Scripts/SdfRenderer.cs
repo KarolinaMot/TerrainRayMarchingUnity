@@ -40,15 +40,6 @@ public class SdfRenderer : MonoBehaviour
     [Space(10)]
 
     [Header("Terrain shading")]
-    public float sunAngularRadius = 3;
-    public float shadowSteps = 1024;
-    public float shadowStepsOptimized = 225;
-    public int shadowSamples = 16;
-    public float shdowEpsilon = 35f;
-    public float shdowEpsilonOptimized = 10f;
-    public float shadowHitDistance = -5f;
-    public bool useBlueNoise = true;
-    public bool pathTracedShadows = true;
     public bool optimizeTracing = true;
 
     private void Start()
@@ -161,23 +152,12 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeFloatParam(marchCS, "_OceanDepth", oceanDepth);
         cmd.SetComputeVectorParam(marchCS, "_SunDirectionIntensity", sunDirIntensity);
         cmd.SetComputeVectorParam(marchCS, "_SunColor", sunColor);
-        cmd.SetComputeFloatParam(marchCS, "_SunAngularRadius", sunAngularRadius);
-        cmd.SetComputeFloatParam(marchCS, "_ShdowEpsilon", shdowEpsilon);
-        cmd.SetComputeFloatParam(marchCS, "_ShdowEpsilonOptimized", shdowEpsilonOptimized);
         cmd.SetComputeVectorParam(marchCS, "_ChunkSize", noiseGen.chunkSize);
-        cmd.SetComputeFloatParam(marchCS, "_ShadowHitDistance", shadowHitDistance);
         cmd.SetComputeVectorParam(marchCS, "_ChunkCoord", new Vector2(0f,0f));
-        cmd.SetComputeFloatParam(marchCS, "_ShadowSteps", shadowSteps);
-        cmd.SetComputeFloatParam(marchCS, "_ShadowStepsOptimized", shadowStepsOptimized);
         cmd.SetComputeFloatParam(marchCS, "_MaxHeight", meshToHeightfield.max);
         cmd.SetComputeFloatParam(marchCS, "_MinHeight", meshToHeightfield.min);
-        cmd.SetComputeIntParam(marchCS, "_ShadowSamples", (int)shadowSamples);
-        cmd.SetComputeIntParam(marchCS, "_UseBlueNoise", useBlueNoise ? 1 : 0);
-        cmd.SetComputeIntParam(marchCS, "_UsePathtracedShadows", pathTracedShadows ? 1 : 0);
-        cmd.SetComputeIntParam(marchCS, "_UseRaymarchOptimization", optimizeTracing ? 1 : 0);
         cmd.SetComputeIntParam(marchCS, "_UseRaymarchOptimization", optimizeTracing ? 1 : 0);
         cmd.SetComputeIntParam(marchCS, "_VisualizeTerrain", visualizeTerrain ? 1 : 0);
-        cmd.SetComputeIntParam(marchCS, "_Raymarch", raymarch ? 1 : 0);
         cmd.SetComputeMatrixParam(marchCS, "_WorldToLightClip", heightfieldShadowMap.worldToLightClip);
         cmd.SetComputeTextureParam(marchCS, kernel, "_ShadowMap", heightfieldShadowMap.shadowMap);
         cmd.SetComputeTextureParam(

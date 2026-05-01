@@ -10,6 +10,8 @@ float _ShadowEpsilon;
 int _MaxSteps;
 float _DistanceForHit;
 float _SunAngularRadius;
+uint _ConvergeShadows;
+
 static const float sPi = 3.14159265359;
 
 Texture2D<float> _HeightMap;
@@ -101,18 +103,22 @@ void Main (uint3 id : SV_DispatchThreadID)
     bool hit = MarchedShadows(ro, rd, Hash(id.x + id.y * dims.x) + _FrameIndex, hitT);
     
     float shadow = hit ? AMBIENT_INTENSITY : 1.f;
-    float2 tempShadows = _TemporalShadowPrev.Load(id);
     
-    float oldShadows = tempShadows.r;
-    float oldShadowSampleNum = tempShadows.g;
+    if(_ConvergeShadows)
+    {
+        float2 tempShadows = _TemporalShadowPrev.Load(id);
     
-    float newShadows = oldShadows + shadow;
-    float newShadowSampleNum = oldShadowSampleNum + 1;
+        float oldShadows = tempShadows.r;
+        float oldShadowSampleNum = tempShadows.g;
     
-    float shadowRes = newShadows / max(1.f, newShadowSampleNum);
+        float newShadows = oldShadows + shadow;
+        float newShadowSampleNum = oldShadowSampleNum + 1;
     
-    shadow = newShadows / newShadowSampleNum;
-    _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
+        float shadowRes = newShadows / max(1.f, newShadowSampleNum);
+    
+        shadow = newShadows / newShadowSampleNum;
+        _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
+    }
 
     _Result[id.xy] = shadow;
 }

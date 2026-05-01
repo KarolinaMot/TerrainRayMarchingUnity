@@ -8,6 +8,7 @@ using static Unity.VisualScripting.Member;
 
 public class HeightfieldShadowMap : MonoBehaviour
 {
+    public bool convergeShadows;
     public int shadowMapResolution;
     public float distanceForHit;
     public float sunAngularRadius = 0.2f;
@@ -29,9 +30,6 @@ public class HeightfieldShadowMap : MonoBehaviour
 
     float prevShadowSoftness;
     Vector3 prevSunDirection;
-    int prevShadowSamples;
-    bool prevUseBlueNoise;
-    bool prevUsePathtraced;
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
@@ -133,6 +131,7 @@ public class HeightfieldShadowMap : MonoBehaviour
         cmd.SetComputeFloatParam(shadowMapCS, "_ShadowEpsilon", shadowEpsilon);
         cmd.SetComputeTextureParam(shadowMapCS, kernel, "_TemporalShadow", temporalShadow[Time.frameCount % 2]);
         cmd.SetComputeTextureParam(shadowMapCS, kernel, "_TemporalShadowPrev", temporalShadow[(Time.frameCount + 1) % 2]);
+        cmd.SetComputeIntParam(shadowMapCS, "_ConvergeShadows", convergeShadows ? 1 : 0);
 
         cmd.DispatchCompute(shadowMapCS, kernel,
         Mathf.CeilToInt(shadowMap.width / 16.0f),
