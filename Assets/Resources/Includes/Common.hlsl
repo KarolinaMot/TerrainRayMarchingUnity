@@ -4,6 +4,7 @@
 #include "UnityCG.cginc"
 #include "Lighting.cginc"
 #include "HLSLSupport.cginc"
+#define AMBIENT_INTENSITY 0.2f
 
 #define sqr(x) (x * x)
 

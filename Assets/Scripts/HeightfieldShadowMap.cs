@@ -1,8 +1,9 @@
-using System.Drawing;
+﻿using System.Drawing;
 using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
+using static Unity.Burst.Intrinsics.X86.Avx;
 using static Unity.VisualScripting.Member;
 
 public class HeightfieldShadowMap : MonoBehaviour
@@ -20,10 +21,23 @@ public class HeightfieldShadowMap : MonoBehaviour
     private SdfRenderer sdfRenderer;
     private Light sun;
     public Matrix4x4 worldToLightClip;
+    private RenderTexture[] temporalShadow = new RenderTexture[2];
+
+    private Vector3 prevCameraPos = Vector3.zero;
+    private Quaternion prevCameraRot = Quaternion.identity;
+    private Camera camera;
+
+    float prevShadowSoftness;
+    Vector3 prevSunDirection;
+    int prevShadowSamples;
+    bool prevUseBlueNoise;
+    bool prevUsePathtraced;
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
+        camera = GetComponent<Camera>();
+
         var desc = new RenderTextureDescriptor(shadowMapResolution, shadowMapResolution, GraphicsFormat.R32_SFloat, 0);
         desc.enableRandomWrite = true;
         desc.useMipMap = true;
@@ -32,6 +46,16 @@ public class HeightfieldShadowMap : MonoBehaviour
         desc.dimension = TextureDimension.Tex2D;
         desc.volumeDepth = 1;
         desc.depthBufferBits = 0;
+
+        for (int i = 0; i < 2; i++)
+        {
+            temporalShadow[i] = new RenderTexture(shadowMapResolution, shadowMapResolution, 0);
+            temporalShadow[i].graphicsFormat = GraphicsFormat.R32G32_SFloat;
+            temporalShadow[i].enableRandomWrite = true;
+            temporalShadow[i].wrapMode = TextureWrapMode.Clamp;
+            temporalShadow[i].filterMode = FilterMode.Bilinear;
+            temporalShadow[i].Create();
+        }
 
         shadowMap = new RenderTexture(desc);
         shadowMap.filterMode = FilterMode.Trilinear;
@@ -44,34 +68,51 @@ public class HeightfieldShadowMap : MonoBehaviour
         sun = RenderSettings.sun;
         mapSize.x = meshToHeightfield.TargetBounds.size.x;
         mapSize.y = meshToHeightfield.TargetBounds.size.z;
-        DispatchShadowmap();
+
+        //CommandBuffer cmd = new CommandBuffer()
+        //{
+        //    name = "ShadowMap creation"
+        //};
+
+        //DispatchShadowmap(cmd);
+
+        //cmd.Release();
     }
 
-    Vector3[] GetBoundsCorners(Bounds b)
+    private void ClearTemporal(CommandBuffer cmd)
     {
-        Vector3 min = b.min;
-        Vector3 max = b.max;
-
-        return new Vector3[]
+        for (int i = 0; i < 2; i++)
         {
-        new Vector3(min.x, min.y, min.z),
-        new Vector3(max.x, min.y, min.z),
-        new Vector3(min.x, max.y, min.z),
-        new Vector3(max.x, max.y, min.z),
-
-        new Vector3(min.x, min.y, max.z),
-        new Vector3(max.x, min.y, max.z),
-        new Vector3(min.x, max.y, max.z),
-        new Vector3(max.x, max.y, max.z),
-        };
+            cmd.SetRenderTarget(temporalShadow[i]);
+            cmd.ClearRenderTarget(false, true, UnityEngine.Color.clear); // RGFloat → (0,0)
+        }
     }
 
-    void DispatchShadowmap()
+    bool CameraMoved()
     {
-        CommandBuffer cmd = new CommandBuffer()
-        {
-            name = "ShadowMap creation"
-        };
+        bool moved = camera.transform.position != prevCameraPos ||
+                     camera.transform.rotation != prevCameraRot;
+
+        prevCameraPos = camera.transform.position;
+        prevCameraRot = camera.transform.rotation;
+
+        return moved;
+    }
+
+    bool SettingsChanged()
+    {
+        bool changed = prevShadowSoftness != sunAngularRadius ||
+            prevSunDirection != sun.transform.forward;
+
+        prevShadowSoftness = sunAngularRadius;
+        prevSunDirection = sun.transform.forward;
+
+        return changed;
+    }
+
+    void DispatchShadowmap(CommandBuffer cmd)
+    {
+
         int kernel = shadowMapCS.FindKernel("Main");
 
         // 1. World-space terrain bounds
@@ -90,6 +131,8 @@ public class HeightfieldShadowMap : MonoBehaviour
         cmd.SetComputeFloatParam(shadowMapCS, "_DistanceForHit", distanceForHit);
         cmd.SetComputeFloatParam(shadowMapCS, "_SunAngularRadius", sunAngularRadius);
         cmd.SetComputeFloatParam(shadowMapCS, "_ShadowEpsilon", shadowEpsilon);
+        cmd.SetComputeTextureParam(shadowMapCS, kernel, "_TemporalShadow", temporalShadow[Time.frameCount % 2]);
+        cmd.SetComputeTextureParam(shadowMapCS, kernel, "_TemporalShadowPrev", temporalShadow[(Time.frameCount + 1) % 2]);
 
         cmd.DispatchCompute(shadowMapCS, kernel,
         Mathf.CeilToInt(shadowMap.width / 16.0f),
@@ -97,11 +140,24 @@ public class HeightfieldShadowMap : MonoBehaviour
         1);
 
         Graphics.ExecuteCommandBuffer(cmd);
-        cmd.Release();
 
     }
     // Update is called once per frame
     void Update()
     {
+        CommandBuffer cmd = new CommandBuffer()
+        {
+            name = "ShadowMap creation"
+        };
+
+        if (CameraMoved() || SettingsChanged())
+        {
+            ClearTemporal(cmd);
+        }
+
+        DispatchShadowmap(cmd);
+
+        cmd.Release();
+
     }
 }

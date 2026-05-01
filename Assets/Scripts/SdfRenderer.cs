@@ -51,15 +51,6 @@ public class SdfRenderer : MonoBehaviour
     public bool pathTracedShadows = true;
     public bool optimizeTracing = true;
 
-    private RenderTexture[] temporalShadow = new RenderTexture[2];
-    private Vector3 prevCameraPos = Vector3.zero;
-    private Quaternion prevCameraRot = Quaternion.identity;
-    float prevShadowSoftness;
-    Vector3 prevSunDirection;
-    int prevShadowSamples;
-    bool prevUseBlueNoise;
-    bool prevUsePathtraced;
-
     private void Start()
     {
         Camera cam = Camera.main;
@@ -72,17 +63,6 @@ public class SdfRenderer : MonoBehaviour
         meshToHeightfield = GetComponent<MeshToHeightField>();
         heightfieldShadowMap = GetComponent<HeightfieldShadowMap>();
         sun = RenderSettings.sun;
-
-        for (int i = 0; i < 2; i++)
-        {
-            temporalShadow[i] = new RenderTexture(camera.pixelWidth, camera.pixelHeight, 0);
-            temporalShadow[i].graphicsFormat = GraphicsFormat.R32G32_SFloat;
-            temporalShadow[i].enableRandomWrite = true;
-            temporalShadow[i].wrapMode = TextureWrapMode.Clamp;
-            temporalShadow[i].filterMode = FilterMode.Bilinear;
-            temporalShadow[i].Create();
-        }
-
     }
     private void Update()
     {
@@ -149,50 +129,9 @@ public class SdfRenderer : MonoBehaviour
         camera.AddCommandBuffer(CameraEvent.BeforeImageEffects, cmd);
     }
 
-    private void ClearTemporal(CommandBuffer cmd)
-    {
-        for (int i = 0; i < 2; i++)
-        {
-            cmd.SetRenderTarget(temporalShadow[i]);
-            cmd.ClearRenderTarget(false, true, Color.clear); // RGFloat → (0,0)
-        }
-    }
-
-    bool CameraMoved()
-    {
-        bool moved = camera.transform.position != prevCameraPos ||
-                     camera.transform.rotation != prevCameraRot;
-
-        prevCameraPos = camera.transform.position;
-        prevCameraRot = camera.transform.rotation;
-
-        return moved;
-    }
-
-    bool SettingsChanged()
-    {
-        bool changed =
-            prevShadowSoftness != sunAngularRadius ||
-            prevShadowSamples != shadowSamples ||
-            prevUseBlueNoise != useBlueNoise ||
-            prevSunDirection != sun.transform.forward ||
-            prevUsePathtraced != pathTracedShadows;
-
-        prevShadowSoftness = sunAngularRadius;
-        prevShadowSamples = shadowSamples;
-        prevUseBlueNoise = useBlueNoise;
-        prevUsePathtraced = pathTracedShadows;
-        prevSunDirection = sun.transform.forward;
-
-        return changed;
-    }
 
     private void TerrainParameters(int kernel, CommandBuffer cmd)
     {
-        if(CameraMoved() || SettingsChanged())
-        {
-            ClearTemporal(cmd);
-        }
 
         cmd.SetComputeIntParam(marchCS, "_MaxSteps", maxSteps);
         cmd.SetComputeFloatParam(marchCS, "_DistanceForHit", distanceForHit);
@@ -240,8 +179,6 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeIntParam(marchCS, "_VisualizeTerrain", visualizeTerrain ? 1 : 0);
         cmd.SetComputeIntParam(marchCS, "_Raymarch", raymarch ? 1 : 0);
         cmd.SetComputeMatrixParam(marchCS, "_WorldToLightClip", heightfieldShadowMap.worldToLightClip);
-        cmd.SetComputeTextureParam(marchCS, kernel, "_TemporalShadow", temporalShadow[Time.frameCount % 2]);
-        cmd.SetComputeTextureParam(marchCS, kernel, "_TemporalShadowPrev", temporalShadow[(Time.frameCount + 1) % 2]);
         cmd.SetComputeTextureParam(marchCS, kernel, "_ShadowMap", heightfieldShadowMap.shadowMap);
         cmd.SetComputeTextureParam(
             marchCS,

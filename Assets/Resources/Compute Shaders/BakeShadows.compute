@@ -14,6 +14,8 @@ static const float sPi = 3.14159265359;
 
 Texture2D<float> _HeightMap;
 RWTexture2D<float> _Result;
+RWTexture2D<float2> _TemporalShadow;
+Texture2D<float2> _TemporalShadowPrev;
 
 uint Hash(uint x)
 {
@@ -98,5 +100,19 @@ void Main (uint3 id : SV_DispatchThreadID)
     float hitT = 0.f;
     bool hit = MarchedShadows(ro, rd, Hash(id.x + id.y * dims.x) + _FrameIndex, hitT);
     
-    _Result[id.xy] = hit;
+    float shadow = hit ? AMBIENT_INTENSITY : 1.f;
+    float2 tempShadows = _TemporalShadowPrev.Load(id);
+    
+    float oldShadows = tempShadows.r;
+    float oldShadowSampleNum = tempShadows.g;
+    
+    float newShadows = oldShadows + shadow;
+    float newShadowSampleNum = oldShadowSampleNum + 1;
+    
+    float shadowRes = newShadows / max(1.f, newShadowSampleNum);
+    
+    shadow = newShadows / newShadowSampleNum;
+    _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
+
+    _Result[id.xy] = shadow;
 }

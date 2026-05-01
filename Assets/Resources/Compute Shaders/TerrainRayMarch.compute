@@ -6,7 +6,6 @@
 #include "../Includes/BlueNoise.hlsl"
 #include "../Includes/PBR.hlsl"
 #include "../Includes/RaymarchingHelpers.hlsl"
-#define AMBIENT_INTENSITY 0.2f
 // Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
 
@@ -57,12 +56,9 @@ uint _UseRaymarchOptimization;
 float4 _SunDirectionIntensity;
 float3 _SunColor;
 
-SamplerState sampler_TemporalShadowPrev;
-SamplerState sampler_HeightMap;
 RWTexture2D<float4> _Result;
 Texture2D<float4> _Source;
-RWTexture2D<float2> _TemporalShadow;
-Texture2D<float2> _TemporalShadowPrev;
+
 
 float4x4 _CameraToWorld;
 float4x4 _CameraInverseProjection;
@@ -259,7 +255,7 @@ float SampleShadowMap(float3 worldPos, float3 lightDir)
         uv.y < 0.0 || uv.y > 1.0)
         return 1.0;
 
-    return _ShadowMap.SampleLevel(linearClampSampler, uv, 0) ? AMBIENT_INTENSITY : 1.f;
+    return _ShadowMap.SampleLevel(linearClampSampler, uv, 0);
 }
 
 float3 ReconstructWorldPos(uint2 pixel, uint2 dims)
@@ -334,17 +330,6 @@ void Main(uint3 id : SV_DispatchThreadID)
     float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
     col.rgb = rtColor;
     col.rgb *= shadow;
-
-    //float2 tempShadows = _TemporalShadowPrev.Load(id);
-    //float oldShadows = tempShadows.r;
-    //float oldShadowSampleNum = tempShadows.g;
-    //float newShadows = oldShadows + shadow;
-    //float newShadowSampleNum = oldShadowSampleNum + _ShadowSamples;
-    //float shadowRes = newShadows / max(1.f, newShadowSampleNum);
-    //shadow = newShadows / newShadowSampleNum;
-            
-    //_TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
-
     
     //if (_Raymarch && _UseRaymarchOptimization)
     //{

@@ -390,11 +390,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 449899b156aceb24c961da1c4848cd23, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  shadowMapResolution: 1024
+  shadowMapResolution: 526
   distanceForHit: 0.00001
-  paddingXY: 78.2
-  paddingZ: 10
   sunAngularRadius: 0.58
+  shadowEpsilon: 0.2
   maxSteps: 6000
   mapSize: {x: 0, y: 0}
   shadowMap: {fileID: 0}
