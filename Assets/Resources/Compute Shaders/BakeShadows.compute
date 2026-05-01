@@ -79,9 +79,9 @@ bool MarchedShadows(float3 ro, float3 rd, uint seedBase, out float hitT)
     float res = 1.f;
         
     //if (_UseRaymarchOptimization)
-    //    blocked = TraverseHeightfieldMaxMipShadow(ro, lightDir, t, heightTerrain, _ShadowHitDistance, res, _HeightMap, _ChunkSize, linearClampSampler, _ShadowStepsOptimized, _ShdowEpsilonOptimized);
+    blocked = TraverseHeightfieldMaxMipShadow(ro, lightDir, hitT, heightTerrain, _DistanceForHit, res, _HeightMap, _ChunkSize, linearClampSampler, _MaxSteps, _ShadowEpsilon);
     //else
-    blocked = Raymarch(ro, lightDir, hitT, heightTerrain, _MaxSteps, _DistanceForHit, 1e-2f, _ChunkSize, _HeightMap, linearClampSampler);
+    //    blocked = Raymarch(ro, lightDir, hitT, heightTerrain, _MaxSteps, _DistanceForHit, 1e-2f, _ChunkSize, _HeightMap, linearClampSampler);
     return blocked;
 }
 

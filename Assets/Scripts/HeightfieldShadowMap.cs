@@ -151,7 +151,7 @@ public class HeightfieldShadowMap : MonoBehaviour
             name = "ShadowMap creation"
         };
 
-        if (CameraMoved() || SettingsChanged())
+        if (CameraMoved() || SettingsChanged() || !convergeShadows)
         {
             ClearTemporal(cmd);
             convergenceCounter = 0;
