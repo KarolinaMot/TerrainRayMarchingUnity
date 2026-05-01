@@ -14,6 +14,7 @@ public class HeightfieldShadowMap : MonoBehaviour
     public float sunAngularRadius = 0.2f;
     public float shadowEpsilon = 0.2f;
     public int maxSteps;
+    public int convergenceLimit = 100;
     public Vector2 mapSize;
 
     public RenderTexture shadowMap;
@@ -27,6 +28,7 @@ public class HeightfieldShadowMap : MonoBehaviour
     private Vector3 prevCameraPos = Vector3.zero;
     private Quaternion prevCameraRot = Quaternion.identity;
     private Camera camera;
+    private int convergenceCounter;
 
     float prevShadowSoftness;
     Vector3 prevSunDirection;
@@ -125,7 +127,7 @@ public class HeightfieldShadowMap : MonoBehaviour
         cmd.SetComputeVectorParam(shadowMapCS, "_SunDirection", lightDir);
         cmd.SetComputeVectorParam(shadowMapCS, "_ChunkSize", mapSize);
         cmd.SetComputeVectorParam(shadowMapCS, "_ChunkOrigin", bounds.min);
-        cmd.SetComputeFloatParam(shadowMapCS, "_MaxSteps", maxSteps);
+        cmd.SetComputeIntParam(shadowMapCS, "_MaxSteps", maxSteps);
         cmd.SetComputeFloatParam(shadowMapCS, "_DistanceForHit", distanceForHit);
         cmd.SetComputeFloatParam(shadowMapCS, "_SunAngularRadius", sunAngularRadius);
         cmd.SetComputeFloatParam(shadowMapCS, "_ShadowEpsilon", shadowEpsilon);
@@ -138,7 +140,7 @@ public class HeightfieldShadowMap : MonoBehaviour
         Mathf.CeilToInt(shadowMap.height / 16.0f),
         1);
 
-        Graphics.ExecuteCommandBuffer(cmd);
+        convergenceCounter++;
 
     }
     // Update is called once per frame
@@ -152,10 +154,13 @@ public class HeightfieldShadowMap : MonoBehaviour
         if (CameraMoved() || SettingsChanged())
         {
             ClearTemporal(cmd);
+            convergenceCounter = 0;
         }
 
-        DispatchShadowmap(cmd);
+        if(convergenceCounter<convergenceLimit)
+            DispatchShadowmap(cmd);
 
+        Graphics.ExecuteCommandBuffer(cmd);
         cmd.Release();
 
     }

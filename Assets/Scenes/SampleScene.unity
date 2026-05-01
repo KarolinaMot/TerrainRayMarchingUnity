@@ -135,8 +135,8 @@ GameObject:
   - component: {fileID: 330585549}
   - component: {fileID: 330585552}
   - component: {fileID: 330585550}
-  - component: {fileID: 330585548}
   - component: {fileID: 330585553}
+  - component: {fileID: 330585548}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -290,15 +290,6 @@ MonoBehaviour:
   rockLevel: 71
   snowLevel: 745.9
   oceanDepth: -2501.15
-  sunAngularRadius: 0.58
-  shadowSteps: 4196
-  shadowStepsOptimized: 600
-  shadowSamples: 1
-  shdowEpsilon: 0.8
-  shdowEpsilonOptimized: 1.5
-  shadowHitDistance: 0
-  useBlueNoise: 0
-  pathTracedShadows: 0
   optimizeTracing: 1
 --- !u!114 &330585549
 MonoBehaviour:
@@ -324,7 +315,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: e86a9b3f6dc4ef04aaa99ddb7f37be42, type: 3}
   m_Name: 
@@ -368,7 +359,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   terrain: {fileID: -2432090755550338912, guid: 839e5eb85092ed249a0389dcda17bd01, type: 3}
   outputPath: Assets/Resources/Heightmaps/BakedHeightmap.raw
-  resolution: 4096
+  resolution: 526
   bakeLayer:
     serializedVersion: 2
     m_Bits: 4294967295
@@ -390,11 +381,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 449899b156aceb24c961da1c4848cd23, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  convergeShadows: 1
   shadowMapResolution: 526
   distanceForHit: 0.00001
   sunAngularRadius: 0.58
   shadowEpsilon: 0.2
   maxSteps: 6000
+  convergenceLimit: 100
   mapSize: {x: 0, y: 0}
   shadowMap: {fileID: 0}
   worldToLightClip:
