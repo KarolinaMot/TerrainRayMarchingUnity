@@ -11,7 +11,6 @@ public class MeshToHeightField : MonoBehaviour
     [Header("Ouput")]
     public string outputPath;
 
-
     [Header("Bake Settings")]
     public int resolution = 2048;
     public LayerMask bakeLayer = ~0;

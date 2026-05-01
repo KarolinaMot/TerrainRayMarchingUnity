@@ -16,7 +16,6 @@ public class HeightfieldShadowMap : MonoBehaviour
     public int maxSteps;
     public int convergenceLimit = 100;
     public Vector2 mapSize;
-
     public RenderTexture shadowMap;
     private ComputeShader shadowMapCS;
     private MeshToHeightField meshToHeightfield;
@@ -32,7 +31,7 @@ public class HeightfieldShadowMap : MonoBehaviour
 
     float prevShadowSoftness;
     Vector3 prevSunDirection;
-
+    
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
