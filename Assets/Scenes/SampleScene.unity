@@ -269,7 +269,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7817cd5ecbb5e284189d7664215d815b, type: 3}
   m_Name: 
@@ -358,18 +358,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9d6e560555409254d88796c1f2aa52ec, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  terrain: {fileID: -2432090755550338912, guid: 839e5eb85092ed249a0389dcda17bd01, type: 3}
-  outputPath: Assets/Resources/Heightmaps/BakedHeightmap.raw
+  terrainParent: {fileID: 919132149423648781}
+  outputPath: Assets/Resources/Heightmaps/
   resolution: 526
   bakeLayer:
     serializedVersion: 2
     m_Bits: 4294967295
-  HeightTexture: {fileID: 0}
   max: 0
   min: 0
-  _bounds:
-    m_Center: {x: 0, y: 0, z: 0}
-    m_Extent: {x: 0, y: 0, z: 0}
 --- !u!114 &330585553
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -377,7 +373,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 449899b156aceb24c961da1c4848cd23, type: 3}
   m_Name: 
@@ -750,7 +746,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 919132149155446097, guid: 839e5eb85092ed249a0389dcda17bd01, type: 3}
       propertyPath: m_IsActive
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 1151388028547126963, guid: 839e5eb85092ed249a0389dcda17bd01, type: 3}
       propertyPath: m_LocalPosition.x
@@ -952,7 +948,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!1 &1018878455786673151
 GameObject:
   m_ObjectHideFlags: 0

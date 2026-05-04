@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -9,13 +10,13 @@ public struct TerrainChunk
 {
     public Transform transform;
     public Bounds bounds;
-    public RenderTexture heightTexture;
+    public int indexInArray;
 
-    public TerrainChunk(Transform t, Bounds b, RenderTexture h)
+    public TerrainChunk(Transform t, Bounds b, int index)
     {
         this.transform = t;
         this.bounds = b;
-        this.heightTexture = h;
+        this.indexInArray = index;
     }
 }
 
@@ -37,6 +38,7 @@ public class MeshToHeightField : MonoBehaviour
 
     public float max, min;
     public List<TerrainChunk> chunks = new List<TerrainChunk>();
+    public RenderTexture heightRTArray;
 
     private Camera _bakeCamera;
   //  private RenderTexture _tempHeightTexture;
@@ -100,20 +102,33 @@ public class MeshToHeightField : MonoBehaviour
         cmd.GetTemporaryRT(rtId, desc);
         RenderTargetIdentifier tempRt = new RenderTargetIdentifier(rtId, 0, CubemapFace.Unknown, -1);
 
+        int slices = meshFilters.Count();
+
+        if (slices == 0)
+            return;
+
+        heightRTArray = new RenderTexture(resolution, resolution, 0);
+        heightRTArray.dimension = UnityEngine.Rendering.TextureDimension.Tex2DArray;
+        heightRTArray.volumeDepth = slices;
+        heightRTArray.graphicsFormat = GraphicsFormat.R32_SFloat;
+        heightRTArray.enableRandomWrite = true; // REQUIRED for compute shaders
+        heightRTArray.useMipMap = false;
+
+        heightRTArray.wrapMode = TextureWrapMode.Clamp;
+        heightRTArray.filterMode = FilterMode.Bilinear;
+        heightRTArray.name = "MeshHeightmap_GPU_" + terrainParent.name;
+        heightRTArray.Create();
+
+        int counter = 0;
         foreach (MeshFilter mf in meshFilters)
         {
             if (mf.sharedMesh != null)
             {
-                RenderTexture heightTexture = new RenderTexture(desc);
-                heightTexture.name = "MeshHeightmap_GPU_"+ mf.name;
-                heightTexture.wrapMode = TextureWrapMode.Clamp;
-                heightTexture.filterMode = FilterMode.Bilinear;
-                heightTexture.Create();
+                TerrainChunk chunk = new TerrainChunk(mf.transform, mf.sharedMesh.bounds, counter);
 
-                TerrainChunk chunk = new TerrainChunk(mf.transform, mf.sharedMesh.bounds, heightTexture);
-
-                BakeHeightmap(cmd, chunk.heightTexture, tempRt, mf.sharedMesh);
+                BakeHeightmap(cmd, counter, tempRt, mf.sharedMesh);
                 chunks.Add(chunk);
+                counter++;
             }
         }
 
@@ -123,7 +138,7 @@ public class MeshToHeightField : MonoBehaviour
 
         foreach (TerrainChunk chunk in chunks)
         {
-            SaveRenderTextureAsRAW(chunk.heightTexture, outputPath + chunk.heightTexture.name + ".raw");
+            SaveRenderTextureAsRAW(chunk.indexInArray, outputPath + heightRTArray.name + chunk.indexInArray + ".raw");
         }
 
     }
@@ -132,17 +147,21 @@ public class MeshToHeightField : MonoBehaviour
     {
 
     }
-    public void SaveRenderTextureAsRAW(RenderTexture rt, string path)
+    public void SaveRenderTextureAsRAW(int indexInArray, string path)
     {
-        Texture2D tex = new Texture2D(rt.width, rt.height, TextureFormat.RFloat, false, true);
+        Texture2D tex = new Texture2D(heightRTArray.width, heightRTArray.height, TextureFormat.RFloat, false, true);
 
         RenderTexture previous = RenderTexture.active;
-        RenderTexture.active = rt;
+        Graphics.SetRenderTarget(
+            heightRTArray,
+            0,                      // mip
+            CubemapFace.Unknown,
+            indexInArray            // THIS is the slice
+        );
 
-        tex.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
+        tex.ReadPixels(new Rect(0, 0, heightRTArray.width, heightRTArray.height), 0, 0);
         tex.Apply();
 
-        RenderTexture.active = previous;
 
         float[] data = tex.GetRawTextureData<float>().ToArray();
 
@@ -189,7 +208,7 @@ public class MeshToHeightField : MonoBehaviour
         System.IO.File.WriteAllBytes(path, bytes);
 
         // Create PNG texture (8-bit grayscale preview)
-        Texture2D pngTex = new Texture2D(rt.width, rt.height, TextureFormat.RGB24, false, true);
+        Texture2D pngTex = new Texture2D(heightRTArray.width, heightRTArray.height, TextureFormat.RGB24, false, true);
 
         UnityEngine.Color[] colors = new UnityEngine.Color[data.Length];
 
@@ -222,7 +241,7 @@ public class MeshToHeightField : MonoBehaviour
     }
 
     [ContextMenu("Bake heightmap")]
-    void BakeHeightmap(CommandBuffer cmd, RenderTexture heightMap, RenderTargetIdentifier tempRt, Mesh terrain)
+    void BakeHeightmap(CommandBuffer cmd, int indexInArray, RenderTargetIdentifier tempRt, Mesh terrain)
     {
         //Configure camera
         {
@@ -239,12 +258,10 @@ public class MeshToHeightField : MonoBehaviour
             _bakeCamera.farClipPlane = 100000f;
         }
 
-        var previousRT = _bakeCamera.targetTexture;
         int oldMask = _bakeCamera.cullingMask;
         Color oldBg = _bakeCamera.backgroundColor;
         CameraClearFlags oldFlags = _bakeCamera.clearFlags;
 
-        _bakeCamera.targetTexture = heightMap;
         _bakeCamera.cullingMask = bakeLayer.value;
         _bakeCamera.clearFlags = CameraClearFlags.SolidColor;
         _bakeCamera.backgroundColor = new Color(terrain.bounds.min.y, 0, 0, 0);
@@ -255,7 +272,16 @@ public class MeshToHeightField : MonoBehaviour
         _bakeCamera.backgroundColor = Color.black;
 
         cmd.BeginSample("Heightmap Bake");
-        cmd.SetRenderTarget(heightMap);
+
+        RenderTargetIdentifier slice =
+            new RenderTargetIdentifier(
+                heightRTArray,
+                0,                      // mip
+                CubemapFace.Unknown,
+                indexInArray                       // array slice
+            );
+
+        cmd.SetRenderTarget(slice);
         cmd.ClearRenderTarget(true, true, Color.black);
 
         cmd.SetViewProjectionMatrices(
@@ -269,14 +295,13 @@ public class MeshToHeightField : MonoBehaviour
         );
         cmd.EndSample("Heightmap Bake");
 
-        _bakeCamera.targetTexture = previousRT;
         _bakeCamera.cullingMask = oldMask;
         _bakeCamera.backgroundColor = oldBg;
         _bakeCamera.clearFlags = oldFlags;
 
-        int srcWidth = heightMap.width;
-        int srcHeight = heightMap.height;
-        int mipCount = heightMap.mipmapCount;
+        int srcWidth = heightRTArray.width;
+        int srcHeight = heightRTArray.height;
+        int mipCount = heightRTArray.mipmapCount;
         int mipKernel = mipCS.FindKernel("ReduceMaxMip");
 
         for (int srcMip = 0; srcMip < mipCount - 1; srcMip++)
@@ -288,7 +313,7 @@ public class MeshToHeightField : MonoBehaviour
             cmd.SetComputeIntParam(mipCS, "_SrcMipSizeX", srcWidth);
             cmd.SetComputeIntParam(mipCS, "_SrcMipSizeY", srcHeight);
 
-            cmd.SetComputeTextureParam(mipCS, mipKernel, "_SrcTex", heightMap);
+            cmd.SetComputeTextureParam(mipCS, mipKernel, "_SrcTex", slice);
             cmd.SetComputeTextureParam(mipCS, mipKernel, "_DstTex", tempRt, srcMip + 1);
 
             int groupsX = Mathf.CeilToInt(dstWidth / 8.0f);
@@ -296,10 +321,11 @@ public class MeshToHeightField : MonoBehaviour
 
             cmd.DispatchCompute(mipCS, mipKernel, groupsX, groupsY, 1);
 
-            cmd.CopyTexture(tempRt, 0, srcMip + 1, heightMap, 0, srcMip + 1);
+            cmd.CopyTexture(tempRt, 0, srcMip + 1, slice, 0, srcMip + 1);
 
             srcWidth = dstWidth;
             srcHeight = dstHeight;
         }
+
     }
 }
