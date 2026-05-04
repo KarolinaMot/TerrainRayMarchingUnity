@@ -10,12 +10,14 @@ public struct TerrainChunk
     public Transform transform;
     public Bounds bounds;
     public RenderTexture heightTexture;
+    public int arrayIndex;
 
-    public TerrainChunk(Transform t, Bounds b, RenderTexture h)
+    public TerrainChunk(Transform t, Bounds b, RenderTexture h, int arrayIndex)
     {
         this.transform = t;
         this.bounds = b;
         this.heightTexture = h;
+        this.arrayIndex = arrayIndex;
     }
 }
 
@@ -42,6 +44,8 @@ public class MeshToHeightField : MonoBehaviour
   //  private RenderTexture _tempHeightTexture;
     private Material _heightBakeMaterial;
     private ComputeShader mipCS;
+
+    public RenderTexture rtArray;
 
     private void Start()
     {
@@ -110,22 +114,38 @@ public class MeshToHeightField : MonoBehaviour
                 heightTexture.filterMode = FilterMode.Bilinear;
                 heightTexture.Create();
 
-                TerrainChunk chunk = new TerrainChunk(mf.transform, mf.sharedMesh.bounds, heightTexture);
+                TerrainChunk chunk = new TerrainChunk(mf.transform, mf.sharedMesh.bounds, heightTexture, chunks.Count);
 
                 BakeHeightmap(cmd, chunk.heightTexture, tempRt, mf.sharedMesh);
                 chunks.Add(chunk);
             }
         }
 
-        //Create texture
-        Graphics.ExecuteCommandBuffer(cmd);
-        cmd.Release();
+        desc.dimension = TextureDimension.Tex2DArray;
+        desc.volumeDepth = chunks.Count;
+        rtArray = new RenderTexture(desc);
+        rtArray.name = "MeshHeightmap_GPU_" + terrainParent.name;
+        rtArray.wrapMode = TextureWrapMode.Clamp;
+        rtArray.filterMode = FilterMode.Bilinear;
+        rtArray.Create();
+
 
         foreach (TerrainChunk chunk in chunks)
         {
             SaveRenderTextureAsRAW(chunk.heightTexture, outputPath + chunk.heightTexture.name + ".raw");
+
+            cmd.CopyTexture(
+              chunk.heightTexture,
+              0,
+              0,
+              rtArray,
+              chunk.arrayIndex,
+              0);
         }
 
+        //Create texture
+        Graphics.ExecuteCommandBuffer(cmd);
+        cmd.Release();
     }
 
     private void Update()
