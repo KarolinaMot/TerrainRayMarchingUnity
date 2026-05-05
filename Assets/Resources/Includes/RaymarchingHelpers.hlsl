@@ -6,8 +6,8 @@ struct ChunkData
     float3 boundsMin;
     float3 boundsMax;
     float2 chunkSize;
-    float3 offset;
-    float3 scale;
+    float4x4 worldToLocal;
+    float4x4 localToWorld;
     int heightSlice;
 };
 
@@ -36,16 +36,17 @@ bool GetBoundsExit(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float
 
 
 
-float SampleTerrainHeightChunk(
-    float2 worldXZ,
+float SampleTerrainHeightChunkLocal(
+    float2 localXZ,
     ChunkData chunk,
     Texture2DArray<float> heightmap,
-    SamplerState linearClampSampler
-)
+    SamplerState linearClampSampler)
 {
-    float2 uv = (worldXZ - chunk.offset.xz) / chunk.chunkSize;
+    float2 sizeXZ = chunk.boundsMax.xz - chunk.boundsMin.xz;
 
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+    float2 uv = (localXZ - chunk.boundsMin.xz) / sizeXZ;
+
+    if (any(uv < 0.0) || any(uv > 1.0))
         return -1e20;
 
     float h = heightmap.SampleLevel(
@@ -53,9 +54,10 @@ float SampleTerrainHeightChunk(
         float3(uv, chunk.heightSlice),
         0
     );
-
-    return h * chunk.scale.y + chunk.offset.y;
+    
+    return h;
 }
+
 
 bool RaymarchChunk(
     float3 rOrigin,
@@ -74,27 +76,30 @@ bool RaymarchChunk(
     terrainHeightAtHit = 0.0;
 
     float tEnter, tExitDomain;
-
+    
+    float3 roLocal = mul(chunk.worldToLocal, float4(rOrigin, 1.0)).xyz;
+    float3 rdLocal = normalize(mul((float3x3) chunk.worldToLocal, rDirection));
+    
     if (!GetBoundsExit(
-        rOrigin,
-        rDirection,
-        chunk.offset.xz + chunk.boundsMin.xz,
-        chunk.offset.xz + chunk.boundsMax.xz,
-        tEnter,
-        tExitDomain
-    ))
+    roLocal,
+    rdLocal,
+    chunk.boundsMin.xz,
+    chunk.boundsMax.xz,
+    tEnter,
+    tExitDomain))
     {
         return false;
     }
     
     hitT = max(tEnter, 0.0);
-    float3 p0 = rOrigin + rDirection * hitT;
-    float terrainY0 = SampleTerrainHeightChunk(
-            p0.xz,
-            chunk,
-            heightmap,
-            linearClampSampler
-        );
+    float3 p0 = roLocal + rdLocal * hitT;
+    float terrainY0 = SampleTerrainHeightChunkLocal(
+                p0.xz,
+                chunk,
+                heightmap,
+                linearClampSampler
+            );
+    
     float prevH = p0.y - terrainY0;
 
     if (prevH < 0.0)
@@ -105,18 +110,18 @@ bool RaymarchChunk(
 
     for (int i = 0; i < maxSteps && hitT < maxT; i++)
     {
-        float3 p = rOrigin + rDirection * hitT;
+        float3 pLocal = roLocal + rdLocal * hitT;
 
-        float terrainY = SampleTerrainHeightChunk(
-        p.xz,
-        chunk,
-        heightmap,
-        linearClampSampler
-    );
+        float terrainY = SampleTerrainHeightChunkLocal(
+                pLocal.xz,
+                chunk,
+                heightmap,
+                linearClampSampler
+            );
 
-        float h = p.y - terrainY;
+        float h = pLocal.y - terrainY;
 
-        if(p.y < chunk.boundsMin.y)
+        if (pLocal.y < chunk.boundsMin.y)
             return false;
         
     // hit only when crossing from above to below
