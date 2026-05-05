@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -19,6 +20,17 @@ public struct TerrainChunk
         this.heightTexture = h;
         this.arrayIndex = arrayIndex;
     }
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct ChunkDataGPU
+{
+    public Vector3 boundsMin;
+    public Vector3 boundsMax;
+    public Vector2 chunkSize;
+    public Vector3 offset;
+    public Vector3 scale;
+    public int heightSlice;
 }
 
 public class MeshToHeightField : MonoBehaviour
@@ -46,6 +58,9 @@ public class MeshToHeightField : MonoBehaviour
     private ComputeShader mipCS;
 
     public RenderTexture rtArray;
+  //  public ComputeBuffer chunkBuffer;
+    public ChunkDataGPU[] chunkData;
+    public ComputeBuffer chunkBuffer;
 
     private void Start()
     {
@@ -132,8 +147,6 @@ public class MeshToHeightField : MonoBehaviour
 
         foreach (TerrainChunk chunk in chunks)
         {
-            SaveRenderTextureAsRAW(chunk.heightTexture, outputPath + chunk.heightTexture.name + ".raw");
-
             cmd.CopyTexture(
               chunk.heightTexture,
               0,
@@ -146,12 +159,45 @@ public class MeshToHeightField : MonoBehaviour
         //Create texture
         Graphics.ExecuteCommandBuffer(cmd);
         cmd.Release();
+
+
+        foreach (TerrainChunk chunk in chunks)
+        {
+            SaveRenderTextureAsRAW(chunk.heightTexture, outputPath + chunk.heightTexture.name + ".raw");
+        }
+
+        BuildChunkBuffer();
     }
 
     private void Update()
     {
 
     }
+
+    private void BuildChunkBuffer()
+    {
+        chunkData = new ChunkDataGPU[chunks.Count];
+        for (int i = 0; i < chunks.Count; i++)
+        {
+            Bounds b = chunks[i].bounds;
+
+            chunkData[i] = new ChunkDataGPU
+            {
+                boundsMin = b.min,
+                boundsMax = b.max,
+                chunkSize = new Vector2(b.size.x, b.size.z),
+                offset = chunks[i].transform.position,
+                scale = chunks[i].transform.lossyScale,
+                heightSlice = i
+            };
+        }
+
+        int stride = Marshal.SizeOf<ChunkDataGPU>();
+
+        chunkBuffer = new ComputeBuffer(chunkData.Length, stride);
+        chunkBuffer.SetData(chunkData);
+    }
+
     public void SaveRenderTextureAsRAW(RenderTexture rt, string path)
     {
         Texture2D tex = new Texture2D(rt.width, rt.height, TextureFormat.RFloat, false, true);

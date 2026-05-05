@@ -17,6 +17,11 @@ int _MaxStepsOptimized;
 float _DistanceForHit;
 
 //Heightmap and info
+Texture2DArray<float> _HeightMapArray;
+StructuredBuffer<ChunkData> _Chunks;
+int _ChunkCount;
+
+
 Texture2D<float> _HeightMap;
 Texture2D<float> _ShadowMap;
 Texture2D<float> _CameraDepthTexture;
@@ -210,7 +215,7 @@ void Main(uint3 id : SV_DispatchThreadID)
     
     float2 shadowUV = uv;
     shadowUV.y = 1 - shadowUV.y;
-    float testValue = _ShadowMap.SampleLevel(linearClampSampler, shadowUV, 0.f);
+    float testValue = _HeightMapArray.SampleLevel(linearClampSampler, float3(uv, 0.f), 0.f);
     
     float elevation = 0;
     float3 col = 0;
@@ -229,51 +234,89 @@ void Main(uint3 id : SV_DispatchThreadID)
     uint flippedY = dims.y - 1 - id.y;
     float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
     col.rgb = rtColor;
-    
+
     if (_VisualizeTerrain)
     {
-        if (_UseRaymarchOptimization)
+        //if (_UseRaymarchOptimization)
+        //{
+        //    hit = TraverseHeightfieldMaxMip(cameraPos, rayDirection, hitT1, elevation, _DistanceForHit, _HeightMap, _ChunkSize, _Scale.y, linearClampSampler, _MaxStepsOptimized, _Offset);
+        //}
+        //else
+        //{
+        //hit = Raymarch(cameraPos, rayDirection, hitT1, elevation, _MaxSteps, _DistanceForHit, 2e-4f, _Chunks[0].chunkSize, _Scale.y, _Offset, _HeightMapArray, linearClampSampler);
+        //if (hit)
+        //    col.rgb = elevation.xxx / 5000.f;
+        //}
+        
+        bool hit = false;
+        float closestT = 1e20;
+        int closestChunk = -1;
+        float closestElevation = 0.0;
+
+        for (int i = 0; i < _ChunkCount; i++)
         {
-            hit = TraverseHeightfieldMaxMip(cameraPos, rayDirection, hitT1, elevation, _DistanceForHit, _HeightMap, _ChunkSize, _Scale.y, linearClampSampler, _MaxStepsOptimized, _Offset);
-        }
-        else
-        {
-            hit = Raymarch(cameraPos, rayDirection, hitT1, elevation, _MaxSteps, _DistanceForHit, 2e-4f, _ChunkSize, _Scale.y, _Offset, _HeightMap, linearClampSampler);
+            ChunkData chunk = _Chunks[i];
+
+            float hitT;
+            float elevation;
+
+            bool chunkHit = RaymarchChunk(
+                    cameraPos,
+                    rayDirection,
+                    hitT,
+                    elevation,
+                    _MaxSteps,
+                    _DistanceForHit,
+                    2e-4f,
+                    chunk,
+                    _HeightMapArray,
+                    linearClampSampler);
+                                                                                 
+        
+            if (chunkHit && hitT < closestT)
+            {
+                hit = true;
+                closestT = hitT;
+                closestElevation = elevation;
+                closestChunk = i;
+                col.rgb = closestElevation.xxx / 5000.f;
+            }
         }
 
-        if (hit)
-        {
-            uint2 heightmapDimensions;
-            _HeightMap.GetDimensions(heightmapDimensions.x, heightmapDimensions.y);
-            float3 p = cameraPos + rayDirection * hitT1;
-            float3 n = GetNormal(p, hitT1, heightmapDimensions.x);
-            float4 biomeValue = BiomeColor(elevation);
+        //if (hit)
+        //{
+        //    uint2 heightmapDimensions;
+        //    _HeightMap.GetDimensions(heightmapDimensions.x, heightmapDimensions.y);
+        //    float3 p = cameraPos + rayDirection * hitT1;
+        //    float3 n = GetNormal(p, hitT1, heightmapDimensions.x);
+        //    float4 biomeValue = BiomeColor(elevation);
         
-            PBRMaterial mat;
-            mat.baseColor = biomeValue.rgb;
-            mat.roughness = biomeValue.a;
-            mat.metallic = _Metallic;
-            mat.normal = n;
-            mat.F0 = float3(0.02, 0.02, 0.02);
-            mat.F0 = lerp(mat.F0, mat.baseColor.rgb, mat.metallic);
-            mat.diffuse = lerp(mat.baseColor.rgb, float3(0.0, 0.0, 0.0), mat.metallic);
+        //    PBRMaterial mat;
+        //    mat.baseColor = biomeValue.rgb;
+        //    mat.roughness = biomeValue.a;
+        //    mat.metallic = _Metallic;
+        //    mat.normal = n;
+        //    mat.F0 = float3(0.02, 0.02, 0.02);
+        //    mat.F0 = lerp(mat.F0, mat.baseColor.rgb, mat.metallic);
+        //    mat.diffuse = lerp(mat.baseColor.rgb, float3(0.0, 0.0, 0.0), mat.metallic);
         
-            float3 viewDirection = normalize(cameraPos - p);
-            float3 sunDir = -normalize(_SunDirectionIntensity.xyz);
+        //    float3 viewDirection = normalize(cameraPos - p);
+        //    float3 sunDir = -normalize(_SunDirectionIntensity.xyz);
         
-            float3 diffuse = 0.f;
-            float3 specular = 0.f;
-            GetBRDF(mat, viewDirection, sunDir, _SunColor, _SunDirectionIntensity.w, 1.f, diffuse, specular);
+        //    float3 diffuse = 0.f;
+        //    float3 specular = 0.f;
+        //    GetBRDF(mat, viewDirection, sunDir, _SunColor, _SunDirectionIntensity.w, 1.f, diffuse, specular);
         
-            float3 ambientColor = 1.f;
-            GetBRDF(mat, viewDirection, viewDirection, ambientColor, AMBIENT_INTENSITY, 1.f, diffuse, specular);
+        //    float3 ambientColor = 1.f;
+        //    GetBRDF(mat, viewDirection, viewDirection, ambientColor, AMBIENT_INTENSITY, 1.f, diffuse, specular);
 
-            col.rgb = diffuse + specular;
-        }
+        //    col.rgb = diffuse + specular;
+        //}
 
     }
     
-    col.rgb *= shadow;
-
+    //col.rgb *= shadow;
     _Result[id.xy] = float4(col.rgb, 1.0);
+
+
 }    

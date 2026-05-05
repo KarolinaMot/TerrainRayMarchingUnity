@@ -1,16 +1,15 @@
 #ifndef RMARCH_HELPER
 #define RMARCH_HELPER
 
-float SampleTerrainHeight(float2 xz, float3 offset, float2 chunkSize, float heightScale, Texture2D<float> heightmap, SamplerState linearClampSampler)
+struct ChunkData
 {
-    float2 uv = (xz - offset.xz) / chunkSize;
-    return heightmap.SampleLevel(linearClampSampler, uv, 0) * heightScale + offset.y;
-}
-
-float LoadMipHeight(int2 texel, int mip, Texture2D<float> heightmap)
-{
-    return heightmap.Load(int3(texel, mip));
-}
+    float3 boundsMin;
+    float3 boundsMax;
+    float2 chunkSize;
+    float3 offset;
+    float3 scale;
+    int heightSlice;
+};
 
 bool GetBoundsExit(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float tEnter, out float tExit)
 {
@@ -33,6 +32,126 @@ bool GetBoundsExit(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float
         return false;
 
     return true;
+}
+
+
+
+float SampleTerrainHeightChunk(
+    float2 worldXZ,
+    ChunkData chunk,
+    Texture2DArray<float> heightmap,
+    SamplerState linearClampSampler
+)
+{
+    float2 uv = (worldXZ - chunk.offset.xz) / chunk.chunkSize;
+
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+        return -1e20;
+
+    float h = heightmap.SampleLevel(
+        linearClampSampler,
+        float3(uv, chunk.heightSlice),
+        0
+    );
+
+    return h * chunk.scale.y + chunk.offset.y;
+}
+
+bool RaymarchChunk(
+    float3 rOrigin,
+    float3 rDirection,
+    out float hitT,
+    out float terrainHeightAtHit,
+    int maxSteps,
+    float distanceForHit,
+    float maxStepPrecision,
+    ChunkData chunk,
+    Texture2DArray<float> heightmap,
+    SamplerState linearClampSampler
+)
+{
+    hitT = 0.0;
+    terrainHeightAtHit = 0.0;
+
+    float tEnter, tExitDomain;
+
+    if (!GetBoundsExit(
+        rOrigin,
+        rDirection,
+        chunk.offset.xz + chunk.boundsMin.xz,
+        chunk.offset.xz + chunk.boundsMax.xz,
+        tEnter,
+        tExitDomain
+    ))
+    {
+        return false;
+    }
+    
+    hitT = max(tEnter, 0.0);
+    float3 p0 = rOrigin + rDirection * hitT;
+    float terrainY0 = SampleTerrainHeightChunk(
+            p0.xz,
+            chunk,
+            heightmap,
+            linearClampSampler
+        );
+    float prevH = p0.y - terrainY0;
+
+    if (prevH < 0.0)
+        return false;
+
+    hitT = max(tEnter, 0.0);
+    float maxT = tExitDomain;
+
+    for (int i = 0; i < maxSteps && hitT < maxT; i++)
+    {
+        float3 p = rOrigin + rDirection * hitT;
+
+        float terrainY = SampleTerrainHeightChunk(
+        p.xz,
+        chunk,
+        heightmap,
+        linearClampSampler
+    );
+
+        float h = p.y - terrainY;
+
+        if(p.y < chunk.boundsMin.y)
+            return false;
+        
+    // hit only when crossing from above to below
+        if (h <= distanceForHit)
+        {
+            terrainHeightAtHit = terrainY;
+            return true;
+        }
+
+        prevH = h;
+
+        float stepSize = max(abs(h) * 0.2, 0.01);
+        stepSize = min(stepSize, 5.0);
+
+        hitT += stepSize;
+    }
+
+    return false;
+}
+
+float SampleTerrainHeight(float2 xz, float3 offset, float2 chunkSize, float heightScale, Texture2D<float> heightmap, SamplerState linearClampSampler)
+{
+    float2 uv = (xz - offset.xz) / chunkSize;
+    return heightmap.SampleLevel(linearClampSampler, uv, 0) * heightScale + offset.y;
+}
+
+float SampleTerrainHeight(float2 xz, float3 offset, float2 chunkSize, float heightScale, Texture2DArray<float> heightmap, SamplerState linearClampSampler)
+{
+    float2 uv = (xz - offset.xz) / chunkSize;
+    return heightmap.SampleLevel(linearClampSampler, float3(uv, 0.f), 0) * heightScale + offset.y;
+}
+
+float LoadMipHeight(int2 texel, int mip, Texture2D<float> heightmap)
+{
+    return heightmap.Load(int3(texel, mip));
 }
 
 
@@ -86,6 +205,55 @@ bool Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terra
     return false;
 }
 
+bool Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terrainHeightAtHit, int maxSteps, float distanceForHit, float maxStepPrecision, float2 chunkSize, float heightScale, float3 offset, Texture2DArray<float> heightmap, SamplerState linearClampSampler)
+{
+    hitT = 0.0;
+    terrainHeightAtHit = 0.0;
+    
+    float tEnter, tExitDomain;
+
+    if (!GetBoundsExit(rOrigin,
+    rDirection,
+    offset.xz,
+    offset.xz + chunkSize,
+    tEnter,
+    tExitDomain))
+        return false;
+
+    bool belowTerrain = rOrigin.y < SampleTerrainHeight(rOrigin.xz, offset, chunkSize, heightScale, heightmap, linearClampSampler);
+    
+    hitT = max(tEnter, 0.0);
+    float maxT = tExitDomain;
+    float3 p0 = rOrigin + rDirection * hitT;
+    float terrainY0 = SampleTerrainHeight(p0.xz, offset, chunkSize, heightScale, heightmap, linearClampSampler);
+    float prevH = p0.y - terrainY0;
+
+    // Start below terrain: do not render/hit underside.
+    if (prevH < 0.0)
+        return false;
+
+    for (int i = 0; i < maxSteps && hitT < maxT; i++)
+    {
+        float3 p = rOrigin + rDirection * hitT;
+
+        float terrainY = SampleTerrainHeight(p.xz, offset, chunkSize, heightScale, heightmap, linearClampSampler);
+        float h = p.y - terrainY;
+
+        // Only accept crossing from above to the terrain surface.
+        if (h <= distanceForHit)
+        {
+            terrainHeightAtHit = terrainY;
+            return true;
+        }
+
+        float stepSize = max(h * 0.2, 0.01);
+        stepSize = min(stepSize, maxT * maxStepPrecision);
+
+        hitT += stepSize;
+    }
+
+    return false;
+}
 
 
 

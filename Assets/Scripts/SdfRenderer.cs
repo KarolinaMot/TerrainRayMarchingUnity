@@ -125,7 +125,6 @@ public class SdfRenderer : MonoBehaviour
 
         cmd.SetComputeIntParam(marchCS, "_MaxSteps", maxSteps);
         cmd.SetComputeFloatParam(marchCS, "_DistanceForHit", distanceForHit);
-       // cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMap", meshToHeightfield.HeightTexture);
 
         Vector4 color = new Vector4(grassColor.r, grassColor.g, grassColor.b, 0.8f);
         Vector4 waterColorRoughness = new Vector4(waterColor.r, waterColor.g, waterColor.b, 0.1f);
@@ -151,7 +150,12 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeFloatParam(marchCS, "_OceanDepth", oceanDepth);
         cmd.SetComputeVectorParam(marchCS, "_SunDirectionIntensity", sunDirIntensity);
         cmd.SetComputeVectorParam(marchCS, "_SunColor", sunColor);
-      //  cmd.SetComputeVectorParam(marchCS, "_ChunkSize", new Vector2(meshToHeightfield.TargetBounds.size.x * terrainTransform.lossyScale.x, meshToHeightfield.TargetBounds.size.z * terrainTransform.lossyScale.z) );
+        cmd.SetBufferData(meshToHeightfield.chunkBuffer, meshToHeightfield.chunkData);
+        cmd.SetComputeBufferParam(marchCS, kernel, "_Chunks", meshToHeightfield.chunkBuffer);
+        cmd.SetComputeIntParam(marchCS, "_ChunkCount", meshToHeightfield.chunkData.Length);
+        cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMapArray", meshToHeightfield.rtArray);
+
+        //  cmd.SetComputeVectorParam(marchCS, "_ChunkSize", new Vector2(meshToHeightfield.TargetBounds.size.x * terrainTransform.lossyScale.x, meshToHeightfield.TargetBounds.size.z * terrainTransform.lossyScale.z) );
         cmd.SetComputeFloatParam(marchCS, "_MaxHeight", meshToHeightfield.max);
         cmd.SetComputeFloatParam(marchCS, "_MinHeight", meshToHeightfield.min);
         cmd.SetComputeVectorParam(marchCS, "_Scale", terrainTransform.lossyScale);
