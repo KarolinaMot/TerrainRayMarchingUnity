@@ -155,7 +155,6 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeIntParam(marchCS, "_ChunkCount", meshToHeightfield.chunkData.Length);
         cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMapArray", meshToHeightfield.rtArray);
 
-        //  cmd.SetComputeVectorParam(marchCS, "_ChunkSize", new Vector2(meshToHeightfield.TargetBounds.size.x * terrainTransform.lossyScale.x, meshToHeightfield.TargetBounds.size.z * terrainTransform.lossyScale.z) );
         cmd.SetComputeFloatParam(marchCS, "_MaxHeight", meshToHeightfield.max);
         cmd.SetComputeFloatParam(marchCS, "_MinHeight", meshToHeightfield.min);
         cmd.SetComputeVectorParam(marchCS, "_Scale", terrainTransform.lossyScale);

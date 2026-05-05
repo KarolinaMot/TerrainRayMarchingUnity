@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using Unity.Mathematics;
 using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -30,6 +31,8 @@ public struct ChunkDataGPU
     public Vector2 chunkSize;
     public Matrix4x4 worldToLocal;
     public Matrix4x4 localToWorld;
+    public Vector3 offset;
+    public Vector3 scale;
     public int heightSlice;
 }
 
@@ -147,13 +150,17 @@ public class MeshToHeightField : MonoBehaviour
 
         foreach (TerrainChunk chunk in chunks)
         {
-            cmd.CopyTexture(
-              chunk.heightTexture,
-              0,
-              0,
-              rtArray,
-              chunk.arrayIndex,
-              0);
+            for(int i=0; i<chunk.heightTexture.mipmapCount; i++)
+            {
+                cmd.CopyTexture(
+                  chunk.heightTexture,
+                  0,
+                  i,
+                  rtArray,
+                  chunk.arrayIndex,
+                  i);
+            }
+            
         }
 
         //Create texture
@@ -186,10 +193,12 @@ public class MeshToHeightField : MonoBehaviour
                 boundsMin = b.min,
                 boundsMax = b.max,
                 chunkSize = new Vector2(b.size.x, b.size.z),
+                offset = chunks[i].transform.position,
+                scale = chunks[i].transform.lossyScale,
                 worldToLocal = chunks[i].transform.worldToLocalMatrix,
                 localToWorld = chunks[i].transform.localToWorldMatrix,
                 heightSlice = i
-            };
+            };  
         }
 
         int stride = Marshal.SizeOf<ChunkDataGPU>();
