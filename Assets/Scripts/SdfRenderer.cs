@@ -116,6 +116,7 @@ public class SdfRenderer : MonoBehaviour
         cmd.Blit(rtId, dstId);
 
         cmd.ReleaseTemporaryRT(rt);
+        cmd.ReleaseTemporaryRT(sourceRT);
 
         camera.RemoveCommandBuffers(CameraEvent.BeforeImageEffects);
         camera.AddCommandBuffer(CameraEvent.BeforeImageEffects, cmd);
@@ -155,10 +156,6 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeIntParam(marchCS, "_ChunkCount", meshToHeightfield.chunkData.Length);
         cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMapArray", meshToHeightfield.rtArray);
 
-        cmd.SetComputeFloatParam(marchCS, "_MaxHeight", meshToHeightfield.max);
-        cmd.SetComputeFloatParam(marchCS, "_MinHeight", meshToHeightfield.min);
-        cmd.SetComputeVectorParam(marchCS, "_Scale", terrainTransform.lossyScale);
-        cmd.SetComputeVectorParam(marchCS, "_Offset", terrainTransform.position);
         cmd.SetComputeIntParam(marchCS, "_UseRaymarchOptimization", optimizeTracing ? 1 : 0);
         cmd.SetComputeIntParam(marchCS, "_VisualizeTerrain", visualizeTerrain ? 1 : 0);
         cmd.SetComputeMatrixParam(marchCS, "_WorldToLightClip", heightfieldShadowMap.worldToLightClip);

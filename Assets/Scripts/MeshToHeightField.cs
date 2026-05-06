@@ -136,7 +136,6 @@ public class MeshToHeightField : MonoBehaviour
                 chunks.Add(chunk);
             }
         }
-
         desc.dimension = TextureDimension.Tex2DArray;
         desc.volumeDepth = chunks.Count;
         rtArray = new RenderTexture(desc);
@@ -145,6 +144,7 @@ public class MeshToHeightField : MonoBehaviour
         rtArray.filterMode = FilterMode.Bilinear;
         rtArray.Create();
 
+        chunkData = new ChunkDataGPU[chunks.Count];
 
         foreach (TerrainChunk chunk in chunks)
         {
@@ -157,11 +157,13 @@ public class MeshToHeightField : MonoBehaviour
                   rtArray,
                   chunk.arrayIndex,
                   i);
+
             }
-            
+            chunk.heightTexture.Release();
         }
 
         //Create texture
+        cmd.ReleaseTemporaryRT(rtId);
         Graphics.ExecuteCommandBuffer(cmd);
         cmd.Release();
 
@@ -173,6 +175,21 @@ public class MeshToHeightField : MonoBehaviour
         BuildChunkBuffer();
     }
 
+    private void OnDestroy()
+    {
+        if (_heightBakeMaterial != null)
+        {
+            Destroy(_heightBakeMaterial);
+            _heightBakeMaterial = null;
+        }
+
+        if (_bakeCamera != null)
+        {
+            Destroy(_bakeCamera.gameObject);
+            _bakeCamera = null;
+        }
+    }
+
     private void Update()
     {
         BuildChunkBuffer();
@@ -180,7 +197,6 @@ public class MeshToHeightField : MonoBehaviour
 
     private void BuildChunkBuffer()
     {
-        chunkData = new ChunkDataGPU[chunks.Count];
         for (int i = 0; i < chunks.Count; i++)
         {
             Bounds b = chunks[i].bounds;

@@ -25,9 +25,6 @@ int _ChunkCount;
 Texture2D<float> _HeightMap;
 Texture2D<float> _ShadowMap;
 Texture2D<float> _CameraDepthTexture;
-float2 _ChunkSize;
-float3 _Scale;
-float3 _Offset;
 
 //Material values
 float4 _GrassColorRoughness;
@@ -42,9 +39,6 @@ float _ForestLevel;
 float _RockLevel;
 float _SnowLevel;
 float _OceanDepth;
-
-float _MaxHeight;
-float _MinHeight;
 
 float _Metallic;
 uint _UseRaymarchOptimization;
@@ -134,34 +128,34 @@ float3 SampleConeDirection(float3 axis, float cosMax, float2 u)
 
 
 
-float3 GetNormal(float3 p, float t, uint resolution)
-{
-    float2 texelWorldSize = _ChunkSize / resolution;
-    float2 e = texelWorldSize;
+//float3 GetNormal(float3 p, float t, uint resolution)
+//{
+//    float2 texelWorldSize = _ChunkSize / resolution;
+//    float2 e = texelWorldSize;
     
-    float hL = SampleTerrainHeight(p.xz - float2(e.x, 0), _Offset, _ChunkSize, _Scale.y, _HeightMap, linearClampSampler);
-    float hR = SampleTerrainHeight(p.xz + float2(e.x, 0), _Offset, _ChunkSize, _Scale.y, _HeightMap, linearClampSampler);
-    float hD = SampleTerrainHeight(p.xz - float2(0, e.y), _Offset, _ChunkSize, _Scale.y, _HeightMap, linearClampSampler);
-    float hU = SampleTerrainHeight(p.xz + float2(0, e.y), _Offset, _ChunkSize, _Scale.y, _HeightMap, linearClampSampler);
+//    float hL = SampleTerrainHeight(p.xz - float2(e.x, 0), _Offset, _ChunkSize, _Scale.y, _HeightMap, linearClampSampler);
+//    float hR = SampleTerrainHeight(p.xz + float2(e.x, 0), _Offset, _ChunkSize, _Scale.y, _HeightMap, linearClampSampler);
+//    float hD = SampleTerrainHeight(p.xz - float2(0, e.y), _Offset, _ChunkSize, _Scale.y, _HeightMap, linearClampSampler);
+//    float hU = SampleTerrainHeight(p.xz + float2(0, e.y), _Offset, _ChunkSize, _Scale.y, _HeightMap, linearClampSampler);
 
-    float dhdx = (hR - hL) / (2.0f * e.x);
-    float dhdz = (hU - hD) / (2.0f * e.y);
+//    float dhdx = (hR - hL) / (2.0f * e.x);
+//    float dhdz = (hU - hD) / (2.0f * e.y);
 
-    float3 n = normalize(float3(-dhdx, 1.0f, -dhdz));
+//    float3 n = normalize(float3(-dhdx, 1.0f, -dhdz));
 
-    return n;
-}
+//    return n;
+//}
 
-float SampleShadowMap(float3 worldPos, float3 lightDir)
-{
-    float2 uv = (worldPos.xz - _Offset.xz) / _ChunkSize; // uv.y *= -1;
+//float SampleShadowMap(float3 worldPos, float3 lightDir)
+//{
+//    float2 uv = (worldPos.xz - _Offset.xz) / _ChunkSize; // uv.y *= -1;
 
-    if (uv.x < 0.0 || uv.x > 1.0 ||
-        uv.y < 0.0 || uv.y > 1.0)
-        return 1.0;
+//    if (uv.x < 0.0 || uv.x > 1.0 ||
+//        uv.y < 0.0 || uv.y > 1.0)
+//        return 1.0;
 
-    return _ShadowMap.SampleLevel(linearClampSampler, uv, 0);
-}
+//    return _ShadowMap.SampleLevel(linearClampSampler, uv, 0);
+//}
 
 float3 ReconstructWorldPos(uint2 pixel, uint2 dims)
 {
@@ -229,7 +223,7 @@ void Main(uint3 id : SV_DispatchThreadID)
     float3 sunDir = normalize(_SunDirectionIntensity.xyz);
     float3 worldPos = ReconstructWorldPos(id.xy, dims);
     
-    shadow = SampleShadowMap(worldPos, sunDir);
+   // shadow = SampleShadowMap(worldPos, sunDir);
     
     uint flippedY = dims.y - 1 - id.y;
     float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
