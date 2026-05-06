@@ -26,14 +26,19 @@ public struct TerrainChunk
 [StructLayout(LayoutKind.Sequential)]
 public struct ChunkDataGPU
 {
-    public Vector3 boundsMin;
-    public Vector3 boundsMax;
-    public Vector2 chunkSize;
     public Matrix4x4 worldToLocal;
     public Matrix4x4 localToWorld;
+    public Vector3 boundsMin;
+    public float padding1;
+    public Vector3 boundsMax;
+    public float padding2;
     public Vector3 offset;
+    public float padding3;
     public Vector3 scale;
     public int heightSlice;
+    public Vector2 chunkSize;
+    public Vector2 padding4;
+
 }
 
 public class MeshToHeightField : MonoBehaviour
@@ -134,7 +139,7 @@ public class MeshToHeightField : MonoBehaviour
 
                 TerrainChunk chunk = new TerrainChunk(mf.transform, mf.sharedMesh.bounds, heightTexture, chunks.Count);
 
-                BakeHeightmap(cmd, chunk.heightTexture, tempRt, mf.sharedMesh);
+                BakeHeightmap(cmd, chunk.heightTexture, rtId, mf.sharedMesh);
                 chunks.Add(chunk);
             }
         }
@@ -178,7 +183,7 @@ public class MeshToHeightField : MonoBehaviour
 
     private void Update()
     {
-
+        BuildChunkBuffer();
     }
 
     private void BuildChunkBuffer()
@@ -297,7 +302,7 @@ public class MeshToHeightField : MonoBehaviour
     }
 
     [ContextMenu("Bake heightmap")]
-    void BakeHeightmap(CommandBuffer cmd, RenderTexture heightMap, RenderTargetIdentifier tempRt, Mesh terrain)
+    void BakeHeightmap(CommandBuffer cmd, RenderTexture heightMap, int tempRtId, Mesh terrain)
     {
         //Configure camera
         {
@@ -364,14 +369,14 @@ public class MeshToHeightField : MonoBehaviour
             cmd.SetComputeIntParam(mipCS, "_SrcMipSizeY", srcHeight);
 
             cmd.SetComputeTextureParam(mipCS, mipKernel, "_SrcTex", heightMap);
-            cmd.SetComputeTextureParam(mipCS, mipKernel, "_DstTex", tempRt, srcMip + 1);
+            cmd.SetComputeTextureParam(mipCS, mipKernel, "_DstTex", tempRtId, srcMip + 1);
 
             int groupsX = Mathf.CeilToInt(dstWidth / 8.0f);
             int groupsY = Mathf.CeilToInt(dstHeight / 8.0f);
 
             cmd.DispatchCompute(mipCS, mipKernel, groupsX, groupsY, 1);
 
-            cmd.CopyTexture(tempRt, 0, srcMip + 1, heightMap, 0, srcMip + 1);
+            cmd.CopyTexture(tempRtId, 0, srcMip + 1, heightMap, 0, srcMip + 1);
 
             srcWidth = dstWidth;
             srcHeight = dstHeight;

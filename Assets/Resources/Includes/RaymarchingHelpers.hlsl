@@ -3,14 +3,18 @@
 
 struct ChunkData
 {
-    float3 boundsMin;
-    float3 boundsMax;
-    float2 chunkSize;
     float4x4 worldToLocal;
     float4x4 localToWorld;
+    float3 boundsMin;
+    float padding1;
+    float3 boundsMax;
+    float padding2;
     float3 offset;
+    float padding3;
     float3 scale;
     int heightSlice;
+    float2 chunkSize;
+    float2 padding4;
 };
 
 bool GetBoundsExit(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float tEnter, out float tExit)
@@ -190,7 +194,7 @@ bool TraverseHeightfieldMaxMipChunk(
     float mip0cellDimension = chunkSize / float2(mip0Dimension);
     float e = mip0cellDimension * 0.09f;
 
-    int mip = max((int) dimensions.z - 2, 0);
+    int mip = max((int) dimensions.w - 2, 0);
     uint2 mipSize = GetMipSize(dimensions.xy, mip);
     float2 cellDimension = chunkSize / float2(mipSize);
 
@@ -347,7 +351,7 @@ bool TraverseHeightfieldMaxMipChunk(
             // No actual hit found in this leaf interval, so advance past it
             float consumed = tExit;
 
-            int topMip = max((int) dimensions.z - 2, 0);
+            int topMip = max((int) dimensions.w - 2, 0);
             mip = min(mip + 1, topMip);
             mipSize = GetMipSize(dimensions.xy, mip);
             cellDimension = chunkSize / float2(mipSize);
