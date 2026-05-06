@@ -6,15 +6,9 @@ struct ChunkData
     float4x4 worldToLocal;
     float4x4 localToWorld;
     float3 boundsMin;
-    float padding1;
+    int heightSlice;
     float3 boundsMax;
     float padding2;
-    float3 offset;
-    float padding3;
-    float3 scale;
-    int heightSlice;
-    float2 chunkSize;
-    float2 padding4;
 };
 
 bool GetBoundsExit(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float tEnter, out float tExit)
@@ -68,30 +62,6 @@ float SampleTerrainHeightChunkLocal(
     );
     
     return h;
-}
-
-float SampleTerrainHeightChunk(
-    float2 xz,
-    ChunkData chunk,
-    Texture2DArray<float> heightmap,
-    SamplerState linearClampSampler)
-{
-    float2 worldMin = chunk.offset.xz + chunk.boundsMin.xz * chunk.scale.xz;
-    float2 worldMax = chunk.offset.xz + chunk.boundsMax.xz * chunk.scale.xz;
-    float2 sizeXZ = worldMax - worldMin;
-
-    float2 uv = (xz - worldMin) / sizeXZ;
-
-    if (any(uv < 0.0) || any(uv > 1.0))
-        return -1e20;
-
-    float h = heightmap.SampleLevel(
-        linearClampSampler,
-        float3(uv, chunk.heightSlice),
-        0
-    );
-
-    return h * chunk.scale.y + chunk.offset.y;
 }
 
 float SampleTerrainHeightChunk(float2 xz, float3 offset, float2 chunkSize, float heightScale, Texture2DArray<float> heightmap, int slice, SamplerState linearClampSampler)

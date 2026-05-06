@@ -29,16 +29,9 @@ public struct ChunkDataGPU
     public Matrix4x4 worldToLocal;
     public Matrix4x4 localToWorld;
     public Vector3 boundsMin;
-    public float padding1;
+    public int heightSlice;
     public Vector3 boundsMax;
     public float padding2;
-    public Vector3 offset;
-    public float padding3;
-    public Vector3 scale;
-    public int heightSlice;
-    public Vector2 chunkSize;
-    public Vector2 padding4;
-
 }
 
 public class MeshToHeightField : MonoBehaviour
@@ -196,9 +189,6 @@ public class MeshToHeightField : MonoBehaviour
             {
                 boundsMin = b.min,
                 boundsMax = b.max,
-                chunkSize = new Vector2(b.size.x, b.size.z),
-                offset = chunks[i].transform.position,
-                scale = chunks[i].transform.lossyScale,
                 worldToLocal = chunks[i].transform.worldToLocalMatrix,
                 localToWorld = chunks[i].transform.localToWorldMatrix,
                 heightSlice = i

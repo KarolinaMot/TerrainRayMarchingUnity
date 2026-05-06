@@ -236,18 +236,7 @@ void Main(uint3 id : SV_DispatchThreadID)
     col.rgb = rtColor;
 
     if (_VisualizeTerrain)
-    {
-        //if (_UseRaymarchOptimization)
-        //{
-        //    hit = TraverseHeightfieldMaxMip(cameraPos, rayDirection, hitT1, elevation, _DistanceForHit, _HeightMap, _ChunkSize, _Scale.y, linearClampSampler, _MaxStepsOptimized, _Offset);
-        //}
-        //else
-        //{
-        //hit = Raymarch(cameraPos, rayDirection, hitT1, elevation, _MaxSteps, _DistanceForHit, 2e-4f, _Chunks[0].chunkSize, _Scale.y, _Offset, _HeightMapArray, linearClampSampler);
-        //if (hit)
-        //    col.rgb = elevation.xxx / 5000.f;
-        //}
-        
+    {        
         bool hit = false;
         float closestT = 1e20;
         int closestChunk = -1;
