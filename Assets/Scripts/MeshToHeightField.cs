@@ -172,11 +172,10 @@ public class MeshToHeightField : MonoBehaviour
         Graphics.ExecuteCommandBuffer(cmd);
         cmd.Release();
 
-
-        foreach (TerrainChunk chunk in chunks)
-        {
-            SaveRenderTextureAsRAW(chunk.heightTexture, outputPath + chunk.heightTexture.name + ".raw");
-        }
+        //foreach (TerrainChunk chunk in chunks)
+        //{
+        //    SaveRenderTextureAsRAW(chunk.heightTexture, outputPath + chunk.heightTexture.name + ".raw");
+        //}
 
         BuildChunkBuffer();
     }

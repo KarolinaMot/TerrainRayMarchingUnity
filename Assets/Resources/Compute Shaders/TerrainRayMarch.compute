@@ -275,8 +275,8 @@ void Main(uint3 id : SV_DispatchThreadID)
             float2 worldMin = chunk.offset.xz + chunk.boundsMin.xz * chunk.scale.xz;
             float2 worldMax = chunk.offset.xz + chunk.boundsMax.xz * chunk.scale.xz;
             float2 sizeXZ = worldMax - worldMin;
-            bool chunkHit = TraverseHeightfieldMaxMipChunk(cameraPos, rayDirection, hitT, elevation, _DistanceForHit, _HeightMapArray, sizeXZ, chunk.scale.
-                y, linearClampSampler, _MaxStepsOptimized, chunk.offset, i);
+            bool chunkHit = TraverseHeightfieldMaxMipChunk(cameraPos, rayDirection, hitT, elevation, _DistanceForHit, linearClampSampler,
+            _MaxStepsOptimized, _HeightMapArray, chunk);
                                                                                  
         
             if (chunkHit && hitT < closestT)
