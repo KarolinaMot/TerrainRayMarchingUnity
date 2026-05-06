@@ -220,6 +220,9 @@ bool TraverseHeightfieldMaxMipChunk(
     {
         float3 p = rayOriginInGrid + rd * t;
 
+        if (p.y < chunk.boundsMin.y)
+            return false;
+        
         float2 uv = (p.xz - chunk.boundsMin.xz) / chunkSize;
         int2 cell = clamp((int2) floor(uv * float2(mipSize)), int2(0, 0), int2(mipSize) - 1);
         float cellHeight = LoadMipHeightChunk(cell, mip, heightmap, chunk.heightSlice);
