@@ -252,7 +252,7 @@ void Main(uint3 id : SV_DispatchThreadID)
         float closestT = 1e20;
         int closestChunk = -1;
         float closestElevation = 0.0;
-
+        bool chunkHit;
         for (int i = 0; i < _ChunkCount; i++)
         {
             ChunkData chunk = _Chunks[i];
@@ -260,23 +260,21 @@ void Main(uint3 id : SV_DispatchThreadID)
             float hitT;
             float elevation;
 
-            //bool chunkHit = RaymarchChunk(
-            //        cameraPos,
-            //        rayDirection,
-            //        hitT,
-            //        elevation,
-            //        _MaxSteps,
-            //        _DistanceForHit,
-            //        2e-4f,
-            //        chunk,
-            //        _HeightMapArray,
-            //        linearClampSampler);
-            
-            float2 worldMin = chunk.offset.xz + chunk.boundsMin.xz * chunk.scale.xz;
-            float2 worldMax = chunk.offset.xz + chunk.boundsMax.xz * chunk.scale.xz;
-            float2 sizeXZ = worldMax - worldMin;
-            bool chunkHit = TraverseHeightfieldMaxMipChunk(cameraPos, rayDirection, hitT, elevation, _DistanceForHit, linearClampSampler,
-            _MaxStepsOptimized, _HeightMapArray, chunk);
+            if (!_UseRaymarchOptimization)
+                chunkHit = RaymarchChunk(
+                    cameraPos,
+                    rayDirection,
+                    hitT,
+                    elevation,
+                    _MaxSteps,
+                    _DistanceForHit,
+                    2e-4f,
+                    chunk,
+                    _HeightMapArray,
+                    linearClampSampler);
+            else
+                 chunkHit = TraverseHeightfieldMaxMipChunk(cameraPos, rayDirection, hitT, elevation, _DistanceForHit, linearClampSampler,
+                _MaxStepsOptimized, _HeightMapArray, chunk);
                                                                                  
         
             if (chunkHit && hitT < closestT)
