@@ -15,13 +15,12 @@ public class HeightfieldShadowMap : MonoBehaviour
     public float shadowEpsilon = 0.2f;
     public int maxSteps;
     public int convergenceLimit = 100;
-    public Vector2 mapSize;
-    public RenderTexture shadowMap;
     private ComputeShader shadowMapCS;
     private MeshToHeightField meshToHeightfield;
     private Light sun;
     public Matrix4x4 worldToLightClip;
-    private RenderTexture[] temporalShadow = new RenderTexture[2];
+  //  private RenderTexture[] temporalShadow = new RenderTexture[2];
+    public RenderTexture[] rtShadowArray;
 
     private Vector3 prevCameraPos = Vector3.zero;
     private Quaternion prevCameraRot = Quaternion.identity;
@@ -35,34 +34,43 @@ public class HeightfieldShadowMap : MonoBehaviour
     void Start()
     {
         camera = GetComponent<Camera>();
-
-        var desc = new RenderTextureDescriptor(shadowMapResolution, shadowMapResolution, GraphicsFormat.R32_SFloat, 0);
-        desc.enableRandomWrite = true;
-        desc.useMipMap = true;
-        desc.autoGenerateMips = false;
-        desc.msaaSamples = 1;
-        desc.dimension = TextureDimension.Tex2D;
-        desc.volumeDepth = 1;
-        desc.depthBufferBits = 0;
-
-        for (int i = 0; i < 2; i++)
-        {
-            temporalShadow[i] = new RenderTexture(shadowMapResolution, shadowMapResolution, 0);
-            temporalShadow[i].graphicsFormat = GraphicsFormat.R32G32_SFloat;
-            temporalShadow[i].enableRandomWrite = true;
-            temporalShadow[i].wrapMode = TextureWrapMode.Clamp;
-            temporalShadow[i].filterMode = FilterMode.Bilinear;
-            temporalShadow[i].Create();
-        }
-
-        shadowMap = new RenderTexture(desc);
-        shadowMap.filterMode = FilterMode.Trilinear;
-        shadowMap.wrapMode = TextureWrapMode.Clamp;
-        shadowMap.Create();
-
         shadowMapCS = Resources.Load<ComputeShader>("Compute Shaders/BakeShadows");
         meshToHeightfield = GetComponent<MeshToHeightField>();
         sun = RenderSettings.sun;
+
+        RenderTextureDescriptor desc = new RenderTextureDescriptor(shadowMapResolution, shadowMapResolution);
+        desc.dimension = TextureDimension.Tex2DArray;
+        desc.volumeDepth = meshToHeightfield.chunks.Count;
+        desc.msaaSamples = 1;
+        desc.depthBufferBits = 0;
+        desc.graphicsFormat = GraphicsFormat.R32G32_SFloat;
+        desc.sRGB = false;
+        desc.useMipMap = false;
+        desc.autoGenerateMips = false;
+        desc.enableRandomWrite = true;
+
+        rtShadowArray = new RenderTexture[2];
+        for (int i = 0; i < 2; i++)
+        {
+            rtShadowArray[i] = new RenderTexture(desc);
+            rtShadowArray[i].name = "Shadowmap_GPU_" + meshToHeightfield.terrainParent.name+i;
+            rtShadowArray[i].wrapMode = TextureWrapMode.Clamp;
+            rtShadowArray[i].filterMode = FilterMode.Bilinear;
+            rtShadowArray[i].Create();
+        }
+
+        //for (int i = 0; i < 2; i++)
+        //{
+        //    temporalShadow[i] = new RenderTextureDescriptor(shadowMapResolution, shadowMapResolution);
+        //    temporalShadow[i].graphicsFormat = GraphicsFormat.R32G32_SFloat;
+        //    temporalShadow[i].enableRandomWrite = true;
+        //    temporalShadow[i].wrapMode = TextureWrapMode.Clamp;
+        //    temporalShadow[i].filterMode = FilterMode.Bilinear;
+        //    temporalShadow[i].Create();
+        //}
+
+
+
         //mapSize.x = meshToHeightfield.TargetBounds.size.x;
         //mapSize.y = meshToHeightfield.TargetBounds.size.z;
 
@@ -72,7 +80,7 @@ public class HeightfieldShadowMap : MonoBehaviour
     {
         for (int i = 0; i < 2; i++)
         {
-            cmd.SetRenderTarget(temporalShadow[i]);
+            cmd.SetRenderTarget(rtShadowArray[i]);
             cmd.ClearRenderTarget(false, true, UnityEngine.Color.clear); // RGFloat → (0,0)
         }
     }
@@ -111,27 +119,27 @@ public class HeightfieldShadowMap : MonoBehaviour
         Vector3 lightDir = sun.transform.forward;
 
         Matrix4x4 lightClipToWorld = worldToLightClip.inverse;
-       // cmd.SetComputeTextureParam(shadowMapCS, kernel, "_HeightMap", meshToHeightfield.HeightTexture);
-        cmd.SetComputeTextureParam(shadowMapCS, kernel, "_Result", shadowMap);
+        cmd.SetComputeTextureParam(shadowMapCS, kernel, "_Result", rtShadowArray[Time.frameCount % 2]);
+        cmd.SetComputeTextureParam(shadowMapCS, kernel, "_ResultPrev", rtShadowArray[(Time.frameCount +1) % 2]);
+        cmd.SetComputeTextureParam(shadowMapCS, kernel, "_HeightMapArray", meshToHeightfield.rtArray);
         cmd.SetComputeVectorParam(shadowMapCS, "_SunDirection", lightDir);
-        cmd.SetComputeVectorParam(shadowMapCS, "_ChunkSize", mapSize);
-        //cmd.SetComputeVectorParam(shadowMapCS, "_ChunkOrigin", bounds.min);
         cmd.SetComputeIntParam(shadowMapCS, "_MaxSteps", maxSteps);
         cmd.SetComputeFloatParam(shadowMapCS, "_DistanceForHit", distanceForHit);
         cmd.SetComputeFloatParam(shadowMapCS, "_SunAngularRadius", sunAngularRadius);
         cmd.SetComputeFloatParam(shadowMapCS, "_ShadowEpsilon", shadowEpsilon);
-        cmd.SetComputeTextureParam(shadowMapCS, kernel, "_TemporalShadow", temporalShadow[Time.frameCount % 2]);
-        cmd.SetComputeTextureParam(shadowMapCS, kernel, "_TemporalShadowPrev", temporalShadow[(Time.frameCount + 1) % 2]);
+        cmd.SetComputeBufferParam(shadowMapCS, kernel, "_Chunks", meshToHeightfield.chunkBuffer);
+        cmd.SetComputeIntParam(shadowMapCS, "_ChunkCount", meshToHeightfield.chunkData.Length);
         cmd.SetComputeIntParam(shadowMapCS, "_ConvergeShadows", convergeShadows ? 1 : 0);
 
         cmd.DispatchCompute(shadowMapCS, kernel,
-        Mathf.CeilToInt(shadowMap.width / 16.0f),
-        Mathf.CeilToInt(shadowMap.height / 16.0f),
-        1);
+        Mathf.CeilToInt(rtShadowArray[0].width / 16.0f),
+        Mathf.CeilToInt(rtShadowArray[0].height / 16.0f),
+        Mathf.CeilToInt(meshToHeightfield.chunkData.Length / 4.0f));
 
         convergenceCounter++;
 
     }
+
     // Update is called once per frame
     void Update()
     {

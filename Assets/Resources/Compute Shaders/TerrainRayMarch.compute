@@ -22,8 +22,7 @@ StructuredBuffer<ChunkData> _Chunks;
 int _ChunkCount;
 
 
-Texture2D<float> _HeightMap;
-Texture2D<float> _ShadowMap;
+Texture2DArray<float2> _ShadowMap;
 Texture2D<float> _CameraDepthTexture;
 
 //Material values
@@ -146,17 +145,24 @@ float3 SampleConeDirection(float3 axis, float cosMax, float2 u)
 //    return n;
 //}
 
-//float SampleShadowMap(float3 worldPos, float3 lightDir)
-//{
-//    float2 uv = (worldPos.xz - _Offset.xz) / _ChunkSize; // uv.y *= -1;
+float SampleShadowMap(float3 worldPos, ChunkData chunk)
+{
+    float3 localPos = mul(chunk.worldToLocal, float4(worldPos, 1.0)).xyz;
 
-//    if (uv.x < 0.0 || uv.x > 1.0 ||
-//        uv.y < 0.0 || uv.y > 1.0)
-//        return 1.0;
+    float2 uv = (localPos.xz - chunk.boundsMin.xz) /
+                (chunk.boundsMax.xz - chunk.boundsMin.xz);
 
-//    return _ShadowMap.SampleLevel(linearClampSampler, uv, 0);
-//}
+    if (any(uv < 0.0) || any(uv > 1.0))
+        return 1.0;
 
+    float2 value = _ShadowMap.SampleLevel(
+        linearClampSampler,
+        float3(uv, chunk.heightSlice),
+        0    );
+    
+    return value.x / value.y;
+
+}
 float3 ReconstructWorldPos(uint2 pixel, uint2 dims)
 {
     float2 uv = (float2(pixel) + 0.5) / float2(dims);
@@ -213,7 +219,7 @@ void Main(uint3 id : SV_DispatchThreadID)
     
     float elevation = 0;
     float3 col = 0;
-    float shadow;
+    float shadow = 1.f;
     float hitT1 = 0.0f;
     float3 hitPos;
     float debugGrid = 0.f;
@@ -223,52 +229,55 @@ void Main(uint3 id : SV_DispatchThreadID)
     float3 sunDir = normalize(_SunDirectionIntensity.xyz);
     float3 worldPos = ReconstructWorldPos(id.xy, dims);
     
-   // shadow = SampleShadowMap(worldPos, sunDir);
-    
     uint flippedY = dims.y - 1 - id.y;
     float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
     col.rgb = rtColor;
 
-    if (_VisualizeTerrain)
-    {        
-        bool hit = false;
-        float closestT = 1e20;
-        int closestChunk = -1;
-        float closestElevation = 0.0;
-        bool chunkHit;
-        for (int i = 0; i < _ChunkCount; i++)
-        {
-            ChunkData chunk = _Chunks[i];
+    float closestT = 1e20;
+    int closestChunk = -1;
+    float closestElevation = 0.0;
 
-            float hitT;
-            float elevation;
+    for (int i = 0; i < _ChunkCount; i++)
+    {
+        ChunkData chunk = _Chunks[i];
 
-            if (!_UseRaymarchOptimization)
-                chunkHit = RaymarchChunk(
-                    cameraPos,
-                    rayDirection,
-                    hitT,
-                    elevation,
-                    _MaxSteps,
-                    _DistanceForHit,
-                    2e-4f,
-                    chunk,
-                    _HeightMapArray,
-                    linearClampSampler);
-            else
-                 chunkHit = TraverseHeightfieldMaxMipChunk(cameraPos, rayDirection, hitT, elevation, _DistanceForHit, linearClampSampler,
-                _MaxStepsOptimized, _HeightMapArray, chunk);
+        float hitT = 1.f;
+        float elevation;
+        float2 chunkSize = ((chunk.boundsMax - chunk.boundsMin)).xz;
+        float3 ro = mul(chunk.worldToLocal, float4(cameraPos, 1.0)).xyz;
+        float3 rd = normalize(mul((float3x3) chunk.worldToLocal, rayDirection));
+
+        //if (!_UseRaymarchOptimization)
+        //    hit = RaymarchChunk(
+        //        cameraPos,
+        //        rayDirection,
+        //        hitT,
+        //        elevation,
+        //        _MaxSteps,
+        //        _DistanceForHit,
+        //        2e-9f,
+        //        chunk,
+        //        _HeightMapArray,
+        //        linearClampSampler);
+        //else
+            hit = TraverseHeightfieldMaxMipChunk(ro, rd, hitT, elevation, _DistanceForHit, _HeightMapArray, chunk.heightSlice, chunkSize, 1.f, linearClampSampler, _MaxStepsOptimized, chunk.boundsMin);
                                                                                  
         
-            if (chunkHit && hitT < closestT)
+        if (hit && hitT < closestT)
+        {
+            hit = true;
+            closestT = hitT;
+            closestElevation = elevation;
+            closestChunk = i;
+            if (_VisualizeTerrain)
             {
-                hit = true;
-                closestT = hitT;
-                closestElevation = elevation;
-                closestChunk = 0;
-                col.rgb = closestElevation.xxx / 10000.f;
+                col.rgb = closestElevation.xxx / 100.f;
             }
         }
+        
+        float3 hitPos = cameraPos + rayDirection * closestT;
+        shadow = SampleShadowMap(hitPos, _Chunks[closestChunk]);
+
 
         //if (hit)
         //{
@@ -302,7 +311,7 @@ void Main(uint3 id : SV_DispatchThreadID)
 
     }
     
-    //col.rgb *= shadow;
+    col.rgb *= shadow.xxx;
     _Result[id.xy] = float4(col.rgb, 1.0);
 
 

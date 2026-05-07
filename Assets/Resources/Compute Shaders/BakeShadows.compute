@@ -3,8 +3,7 @@
 #include "../Includes/Common.hlsl"
 #include "../Includes/RaymarchingHelpers.hlsl"
 
-float2 _ChunkOrigin;
-float2 _ChunkSize;
+
 float3 _SunDirection;
 float _ShadowEpsilon;
 int _MaxSteps;
@@ -14,10 +13,15 @@ uint _ConvergeShadows;
 
 static const float sPi = 3.14159265359;
 
-Texture2D<float> _HeightMap;
-RWTexture2D<float> _Result;
-RWTexture2D<float2> _TemporalShadow;
-Texture2D<float2> _TemporalShadowPrev;
+Texture2DArray<float> _HeightMapArray;
+RWTexture2DArray<float2> _Result;
+Texture2DArray<float2> _ResultPrev;
+
+StructuredBuffer<ChunkData> _Chunks;
+int _ChunkCount;
+
+//RWTexture2D<float2> _TemporalShadow;
+//Texture2D<float2> _TemporalShadowPrev;
 
 uint Hash(uint x)
 {
@@ -66,59 +70,71 @@ bool MarchedShadows(float3 ro, float3 rd, uint seedBase, out float hitT)
     float cosMax = cos(max(radians(_SunAngularRadius), 1e-6f));
     float2 u;
 
-
     uint seed = seedBase + 9781u;
     u = float2(Rand(seed), Rand(seed));
         
     float3 lightDir = SampleConeDirection(rd, cosMax, u);
+    //float3 lightDir = rd;
 
-    hitT = 1.f;
-    float heightTerrain = 0.f;
-    bool blocked = false;
-        
+    bool hit = false;
+    float closestT = 1e20;
+    float closestElevation = 0.0;
     float res = 1.f;
+
+    for (int i = 0; i < _ChunkCount; i++)
+    {
+        ChunkData chunk = _Chunks[i];
+        float elevation;
+        float2 chunkSize = ((chunk.boundsMax - chunk.boundsMin)*chunk.scale).xz;
         
-    //if (_UseRaymarchOptimization)
-    blocked = TraverseHeightfieldMaxMipShadow(ro, lightDir, hitT, heightTerrain, _DistanceForHit, res, _HeightMap, _ChunkSize, 1.f, linearClampSampler, _MaxSteps, _ShadowEpsilon, float3(0.f, 0.f, 0.f));
-    //else
-    //    blocked = Raymarch(ro, lightDir, hitT, heightTerrain, _MaxSteps, _DistanceForHit, 1e-2f, _ChunkSize, _HeightMap, linearClampSampler);
-    return blocked;
+        hit = TraverseHeightfieldMaxMipShadowChunk(ro, lightDir, hitT, elevation, _DistanceForHit, res, _HeightMapArray, chunk.heightSlice, chunkSize, chunk.scale.y, linearClampSampler, _MaxSteps, _ShadowEpsilon, chunk.offset);
+
+        if (hit)
+        {
+            hit = true;
+            closestT = hitT;
+            closestElevation = elevation;
+           break;
+        }
+    }
+    
+    hitT = closestT;
+    return hit;
 }
 
-[numthreads(16, 16, 1)]
+[numthreads(16, 16, 4)]
 void Main (uint3 id : SV_DispatchThreadID)
 {
     // TODO: insert actual code here!
-    uint2 dims;
-    _Result.GetDimensions(dims.x, dims.y);
-
-    float2 uv = (id.xy + 0.5) / dims;
-    float2 worldXZ = uv * _ChunkSize;
-    float height = _HeightMap.SampleLevel(linearClampSampler, uv, 0);
+    uint4 dims;
+    _Result.GetDimensions(dims.x, dims.y, dims.z);
+    ChunkData chunk = _Chunks[id.z];
+    float2 chunkSize = (chunk.boundsMax.xz - chunk.boundsMin.xz) * chunk.scale.xz;
+    float2 uv = (id.xy + 0.5) / dims.xy;
+    float2 worldXZ = (uv * chunkSize) + chunk.offset.xz;
+    float height = _HeightMapArray.SampleLevel(linearClampSampler, float3(uv, chunk.heightSlice), 0) * chunk.scale.y + chunk.offset.y;
 
     float3 worldPos = float3(worldXZ.x, height, worldXZ.y);
     float3 rd = -normalize(_SunDirection); // terrain -> sun
     float3 ro = worldPos + rd * _ShadowEpsilon;
+    
     float hitT = 0.f;
     bool hit = MarchedShadows(ro, rd, Hash(id.x + id.y * dims.x) + _FrameIndex, hitT);
     
     float shadow = hit ? AMBIENT_INTENSITY : 1.f;
+    float newShadows = shadow;
+    float newShadowSampleNum = 1;
     
-    if(_ConvergeShadows)
+    if (_ConvergeShadows)
     {
-        float2 tempShadows = _TemporalShadowPrev.Load(id);
+        float2 tempShadows = _ResultPrev.Load(int4(id.xyz, 0));
     
         float oldShadows = tempShadows.r;
         float oldShadowSampleNum = tempShadows.g;
     
-        float newShadows = oldShadows + shadow;
-        float newShadowSampleNum = oldShadowSampleNum + 1;
-    
-        float shadowRes = newShadows / max(1.f, newShadowSampleNum);
-    
-        shadow = newShadows / newShadowSampleNum;
-        _TemporalShadow[id.xy] = float2(newShadows, newShadowSampleNum);
+        newShadows = oldShadows + shadow;
+        newShadowSampleNum = oldShadowSampleNum + 1;    
     }
 
-    _Result[id.xy] = shadow;
+    _Result[id.xyz] = float2(newShadows, newShadowSampleNum);
 }

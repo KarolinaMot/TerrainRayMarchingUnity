@@ -159,7 +159,7 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeIntParam(marchCS, "_UseRaymarchOptimization", optimizeTracing ? 1 : 0);
         cmd.SetComputeIntParam(marchCS, "_VisualizeTerrain", visualizeTerrain ? 1 : 0);
         cmd.SetComputeMatrixParam(marchCS, "_WorldToLightClip", heightfieldShadowMap.worldToLightClip);
-        cmd.SetComputeTextureParam(marchCS, kernel, "_ShadowMap", heightfieldShadowMap.shadowMap);
+        cmd.SetComputeTextureParam(marchCS, kernel, "_ShadowMap", heightfieldShadowMap.rtShadowArray[Time.frameCount % 2]);
         cmd.SetComputeTextureParam(
             marchCS,
             kernel,

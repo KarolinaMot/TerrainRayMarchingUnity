@@ -29,10 +29,17 @@ public struct ChunkDataGPU
     public Matrix4x4 worldToLocal;
     public Matrix4x4 localToWorld;
     public Vector3 boundsMin;
-    public int heightSlice;
+    public float padding1;
     public Vector3 boundsMax;
     public float padding2;
+    public Vector3 offset;
+    public float padding3;
+    public Vector3 scale;
+    public int heightSlice;
+    public Vector2 chunkSize;
+    public Vector2 padding4;
 }
+
 
 public class MeshToHeightField : MonoBehaviour
 {
@@ -47,26 +54,21 @@ public class MeshToHeightField : MonoBehaviour
     public LayerMask bakeLayer = ~0;
 
     Shader heightBakeShader;
-   // public RenderTexture HeightTexture;
     public Camera BakeCamera => _bakeCamera;
 
     public float max, min;
     public List<TerrainChunk> chunks = new List<TerrainChunk>();
 
     private Camera _bakeCamera;
-  //  private RenderTexture _tempHeightTexture;
     private Material _heightBakeMaterial;
     private ComputeShader mipCS;
 
     public RenderTexture rtArray;
-  //  public ComputeBuffer chunkBuffer;
     public ChunkDataGPU[] chunkData;
     public ComputeBuffer chunkBuffer;
 
     private void Start()
     {
-
-
         heightBakeShader = Resources.Load<Shader>("Mesh Shaders/TestBakeRed");
         mipCS = Resources.Load<ComputeShader>("Compute Shaders/MipMapGen");
 
@@ -96,12 +98,10 @@ public class MeshToHeightField : MonoBehaviour
             _bakeCamera.forceIntoRenderTexture = true;
         }
 
-
         if (_heightBakeMaterial == null)
             _heightBakeMaterial = new Material(heightBakeShader);
 
         MeshFilter[] meshFilters = terrainParent.GetComponentsInChildren<MeshFilter>();
-
 
         RenderTextureDescriptor desc = new RenderTextureDescriptor(resolution, resolution);
         desc.dimension = TextureDimension.Tex2D;
@@ -207,7 +207,10 @@ public class MeshToHeightField : MonoBehaviour
                 boundsMax = b.max,
                 worldToLocal = chunks[i].transform.worldToLocalMatrix,
                 localToWorld = chunks[i].transform.localToWorldMatrix,
-                heightSlice = i
+                heightSlice = i,
+                chunkSize = new Vector2(b.size.x, b.size.z),
+                offset = chunks[i].transform.position,
+                scale = chunks[i].transform.lossyScale
             };  
         }
 
