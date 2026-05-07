@@ -65,7 +65,6 @@ bool MarchedShadows(float3 ro, float3 rd, uint seedBase, out float hitT)
 
     rd = normalize(rd);
 
-    float3 rayStart = ro;
     float sunHeight = saturate(rd.y);
     float cosMax = cos(max(radians(_SunAngularRadius), 1e-6f));
     float2 u;
@@ -74,21 +73,23 @@ bool MarchedShadows(float3 ro, float3 rd, uint seedBase, out float hitT)
     u = float2(Rand(seed), Rand(seed));
         
     float3 lightDir = SampleConeDirection(rd, cosMax, u);
-    //float3 lightDir = rd;
+   // float3 lightDir = rd;
 
     bool hit = false;
     float closestT = 1e20;
     float closestElevation = 0.0;
-    float res = 1.f;
 
     for (int i = 0; i < _ChunkCount; i++)
     {
+        
         ChunkData chunk = _Chunks[i];
         float elevation;
-        float2 chunkSize = ((chunk.boundsMax - chunk.boundsMin)*chunk.scale).xz;
+        float2 chunkSize = ((chunk.boundsMax - chunk.boundsMin)).xz;
         
-        hit = TraverseHeightfieldMaxMipShadowChunk(ro, lightDir, hitT, elevation, _DistanceForHit, res, _HeightMapArray, chunk.heightSlice, chunkSize, chunk.scale.y, linearClampSampler, _MaxSteps, _ShadowEpsilon, chunk.offset);
+        float3 roLocal = mul(chunk.worldToLocal, float4(ro, 1.0)).xyz;
+        float3 rdLocal = normalize(mul((float3x3) chunk.worldToLocal, lightDir));
 
+        hit = TraverseHeightfieldMaxMipShadowChunk(roLocal, rdLocal, hitT, elevation, _DistanceForHit, _HeightMapArray, chunk.heightSlice, chunkSize, linearClampSampler, _MaxSteps, _ShadowEpsilon, chunk.boundsMin);
         if (hit)
         {
             hit = true;
@@ -115,8 +116,11 @@ void Main (uint3 id : SV_DispatchThreadID)
     float height = _HeightMapArray.SampleLevel(linearClampSampler, float3(uv, chunk.heightSlice), 0) * chunk.scale.y + chunk.offset.y;
 
     float3 worldPos = float3(worldXZ.x, height, worldXZ.y);
+    
     float3 rd = -normalize(_SunDirection); // terrain -> sun
     float3 ro = worldPos + rd * _ShadowEpsilon;
+    
+
     
     float hitT = 0.f;
     bool hit = MarchedShadows(ro, rd, Hash(id.x + id.y * dims.x) + _FrameIndex, hitT);

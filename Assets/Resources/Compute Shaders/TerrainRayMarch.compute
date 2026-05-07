@@ -271,7 +271,7 @@ void Main(uint3 id : SV_DispatchThreadID)
             closestChunk = i;
             if (_VisualizeTerrain)
             {
-                col.rgb = closestElevation.xxx / 100.f;
+                col.rgb = closestElevation.xxx / 10000.f;
             }
         }
         
