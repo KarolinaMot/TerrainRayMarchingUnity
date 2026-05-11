@@ -1,10 +1,6 @@
-﻿using System.Drawing;
-using Unity.VisualScripting;
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
-using static Unity.Burst.Intrinsics.X86.Avx;
-using static Unity.VisualScripting.Member;
 
 public class HeightfieldShadowMap : MonoBehaviour
 {
@@ -33,6 +29,7 @@ public class HeightfieldShadowMap : MonoBehaviour
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
+        ReleaseShadowTextures();
         camera = GetComponent<Camera>();
         shadowMapCS = Resources.Load<ComputeShader>("Compute Shaders/BakeShadows");
         meshToHeightfield = GetComponent<MeshToHeightField>();
@@ -76,6 +73,30 @@ public class HeightfieldShadowMap : MonoBehaviour
 
     }
 
+    private void OnDisable()
+    {
+        ReleaseShadowTextures();
+    }
+
+    private void OnDestroy()
+    {
+        ReleaseShadowTextures();
+    }
+
+    private void ReleaseShadowTextures()
+    {
+        if (rtShadowArray == null) return;
+
+        for (int i = 0; i < rtShadowArray.Length; i++)
+        {
+            if (rtShadowArray[i] != null)
+            {
+                rtShadowArray[i].Release();
+                Destroy(rtShadowArray[i]);
+                rtShadowArray[i] = null;
+            }
+        }
+    }
     private void ClearTemporal(CommandBuffer cmd)
     {
         for (int i = 0; i < 2; i++)
@@ -132,9 +153,9 @@ public class HeightfieldShadowMap : MonoBehaviour
         cmd.SetComputeIntParam(shadowMapCS, "_ConvergeShadows", convergeShadows ? 1 : 0);
 
         cmd.DispatchCompute(shadowMapCS, kernel,
-        Mathf.CeilToInt(rtShadowArray[0].width / 16.0f),
-        Mathf.CeilToInt(rtShadowArray[0].height / 16.0f),
-        Mathf.CeilToInt(meshToHeightfield.chunkData.Length / 4.0f));
+        Mathf.CeilToInt(rtShadowArray[0].width / 8f),
+        Mathf.CeilToInt(rtShadowArray[0].height / 8f),
+        Mathf.CeilToInt(meshToHeightfield.chunkData.Length));
 
         convergenceCounter++;
 

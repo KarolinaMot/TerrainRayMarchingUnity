@@ -126,43 +126,34 @@ float3 SampleConeDirection(float3 axis, float cosMax, float2 u)
 }
 
 
-
-//float3 GetNormal(float3 p, float t, uint resolution)
-//{
-//    float2 texelWorldSize = _ChunkSize / resolution;
-//    float2 e = texelWorldSize;
-    
-//    float hL = SampleTerrainHeight(p.xz - float2(e.x, 0), _Offset, _ChunkSize, _Scale.y, _HeightMap, linearClampSampler);
-//    float hR = SampleTerrainHeight(p.xz + float2(e.x, 0), _Offset, _ChunkSize, _Scale.y, _HeightMap, linearClampSampler);
-//    float hD = SampleTerrainHeight(p.xz - float2(0, e.y), _Offset, _ChunkSize, _Scale.y, _HeightMap, linearClampSampler);
-//    float hU = SampleTerrainHeight(p.xz + float2(0, e.y), _Offset, _ChunkSize, _Scale.y, _HeightMap, linearClampSampler);
-
-//    float dhdx = (hR - hL) / (2.0f * e.x);
-//    float dhdz = (hU - hD) / (2.0f * e.y);
-
-//    float3 n = normalize(float3(-dhdx, 1.0f, -dhdz));
-
-//    return n;
-//}
-
 float SampleShadowMap(float3 worldPos, ChunkData chunk)
 {
+    float result = 1.0;
+
     float3 localPos = mul(chunk.worldToLocal, float4(worldPos, 1.0)).xyz;
 
-    float2 uv = (localPos.xz - chunk.boundsMin.xz) /
-                (chunk.boundsMax.xz - chunk.boundsMin.xz);
+    float2 denom = max(
+        abs(chunk.boundsMax.xz - chunk.boundsMin.xz),
+        float2(1e-6, 1e-6)
+    );
 
-    if (any(uv < 0.0) || any(uv > 1.0))
-        return 1.0;
+    float2 uv = (localPos.xz - chunk.boundsMin.xz) / denom;
 
-    float2 value = _ShadowMap.SampleLevel(
-        linearClampSampler,
-        float3(uv, chunk.heightSlice),
-        0    );
-    
-    return value.x / value.y;
+    if (all(uv >= 0.0) && all(uv <= 1.0))
+    {
+        float2 value = _ShadowMap.SampleLevel(
+            linearClampSampler,
+            float3(uv, chunk.heightSlice),
+            0
+        );
 
+        if (value.y > 1e-6)
+            result = saturate(value.x / value.y);
+    }
+
+    return result;
 }
+
 float3 ReconstructWorldPos(uint2 pixel, uint2 dims)
 {
     float2 uv = (float2(pixel) + 0.5) / float2(dims);
@@ -220,10 +211,7 @@ void Main(uint3 id : SV_DispatchThreadID)
     float elevation = 0;
     float3 col = 0;
     float shadow = 1.f;
-    float hitT1 = 0.0f;
     float3 hitPos;
-    float debugGrid = 0.f;
-
     bool hit = false;
     
     float3 sunDir = normalize(_SunDirectionIntensity.xyz);
@@ -237,81 +225,68 @@ void Main(uint3 id : SV_DispatchThreadID)
     int closestChunk = -1;
     float closestElevation = 0.0;
 
+    [loop]
     for (int i = 0; i < _ChunkCount; i++)
     {
         ChunkData chunk = _Chunks[i];
 
-        float hitT = 1.f;
-        float elevation;
-        float2 chunkSize = ((chunk.boundsMax - chunk.boundsMin)).xz;
-        float3 ro = mul(chunk.worldToLocal, float4(cameraPos, 1.0)).xyz;
-        float3 rd = normalize(mul((float3x3) chunk.worldToLocal, rayDirection));
+        bool chunkHit = false;
+        float hitT = 0.0;
+        float elevation = 0.0;
 
-        //if (!_UseRaymarchOptimization)
-        //    hit = RaymarchChunk(
-        //        cameraPos,
-        //        rayDirection,
-        //        hitT,
-        //        elevation,
-        //        _MaxSteps,
-        //        _DistanceForHit,
-        //        2e-9f,
-        //        chunk,
-        //        _HeightMapArray,
-        //        linearClampSampler);
-        //else
-            hit = TraverseHeightfieldMaxMipChunk(ro, rd, hitT, elevation, _DistanceForHit, _HeightMapArray, chunk.heightSlice, chunkSize, 1.f, linearClampSampler, _MaxStepsOptimized, chunk.boundsMin);
-                                                                                 
-        
-        if (hit && hitT < closestT)
+        float2 chunkSize = (chunk.boundsMax - chunk.boundsMin).xz;
+
+        float3 roLocal = mul(chunk.worldToLocal, float4(cameraPos, 1.0)).xyz;
+        float3 rdLocal = normalize(mul((float3x3) chunk.worldToLocal, rayDirection));
+
+        chunkHit = TraverseHeightfieldMaxMipChunk(
+        roLocal,
+        rdLocal,
+        hitT,
+        elevation,
+        _DistanceForHit,
+        _HeightMapArray,
+        chunk.heightSlice,
+        chunkSize,
+        1.0,
+        linearClampSampler,
+        _MaxStepsOptimized,
+        chunk.boundsMin );
+
+        if (chunkHit)
         {
-            hit = true;
-            closestT = hitT;
-            closestElevation = elevation;
-            closestChunk = i;
-            if (_VisualizeTerrain)
+            float3 hitLocal = roLocal + rdLocal * hitT;
+            float3 hitWorld = mul(chunk.localToWorld, float4(hitLocal, 1.0)).xyz;
+
+            float worldHitT = length(hitWorld - cameraPos);
+
+            if (worldHitT < closestT)
             {
-                col.rgb = closestElevation.xxx / 10000.f;
+                closestT = worldHitT;
+                closestChunk = i;
+                closestElevation = elevation;
+                hit = true;
             }
         }
         
-        float3 hitPos = cameraPos + rayDirection * closestT;
-        shadow = SampleShadowMap(hitPos, _Chunks[closestChunk]);
-
-
-        //if (hit)
-        //{
-        //    uint2 heightmapDimensions;
-        //    _HeightMap.GetDimensions(heightmapDimensions.x, heightmapDimensions.y);
-        //    float3 p = cameraPos + rayDirection * hitT1;
-        //    float3 n = GetNormal(p, hitT1, heightmapDimensions.x);
-        //    float4 biomeValue = BiomeColor(elevation);
-        
-        //    PBRMaterial mat;
-        //    mat.baseColor = biomeValue.rgb;
-        //    mat.roughness = biomeValue.a;
-        //    mat.metallic = _Metallic;
-        //    mat.normal = n;
-        //    mat.F0 = float3(0.02, 0.02, 0.02);
-        //    mat.F0 = lerp(mat.F0, mat.baseColor.rgb, mat.metallic);
-        //    mat.diffuse = lerp(mat.baseColor.rgb, float3(0.0, 0.0, 0.0), mat.metallic);
-        
-        //    float3 viewDirection = normalize(cameraPos - p);
-        //    float3 sunDir = -normalize(_SunDirectionIntensity.xyz);
-        
-        //    float3 diffuse = 0.f;
-        //    float3 specular = 0.f;
-        //    GetBRDF(mat, viewDirection, sunDir, _SunColor, _SunDirectionIntensity.w, 1.f, diffuse, specular);
-        
-        //    float3 ambientColor = 1.f;
-        //    GetBRDF(mat, viewDirection, viewDirection, ambientColor, AMBIENT_INTENSITY, 1.f, diffuse, specular);
-
-        //    col.rgb = diffuse + specular;
-        //}
-
     }
     
+    if (hit)
+    {
+        int safeChunk = max(closestChunk, 0);
+        ChunkData hitChunk = _Chunks[safeChunk];
+
+        float3 finalHitPos = cameraPos + rayDirection * closestT;
+
+        shadow = SampleShadowMap(finalHitPos, hitChunk);
+    }
+    else
+    {
+        shadow = 1.0;
+    }
+
     col.rgb *= shadow.xxx;
+    
     _Result[id.xy] = float4(col.rgb, 1.0);
 
 

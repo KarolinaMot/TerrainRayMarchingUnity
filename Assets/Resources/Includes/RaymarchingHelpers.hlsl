@@ -16,14 +16,30 @@ struct ChunkData
     float2 chunkSize;
     float2 padding4;
 };
-bool GetBoundsExit(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float tEnter, out float tExit)
+
+bool GetBoundsExit(
+    float3 ro,
+    float3 rd,
+    float2 minPos,
+    float2 maxPos,
+    out float tEnter,
+    out float tExit)
 {
-    tEnter = -1e38;
-    tExit = 1e38;
+    tEnter = -1e20;
+    tExit = 1e20;
 
     const float EPSILON = 1e-8;
 
-    float2 invDir = 1.0 / rd.xz;
+    float2 safeDir = rd.xz;
+
+    if (abs(safeDir.x) < EPSILON)
+        safeDir.x = EPSILON;
+
+    if (abs(safeDir.y) < EPSILON)
+        safeDir.y = EPSILON;
+
+    float2 invDir = 1.0 / safeDir;
+
     float2 t0 = (minPos - ro.xz) * invDir;
     float2 t1 = (maxPos - ro.xz) * invDir;
 
@@ -33,10 +49,7 @@ bool GetBoundsExit(float3 ro, float3 rd, float2 minPos, float2 maxPos, out float
     tEnter = max(tNear.x, tNear.y);
     tExit = min(tFar.x, tFar.y);
 
-    if (tExit < max(tEnter, 0.0))
-        return false;
-
-    return true;
+    return tExit >= max(tEnter, 0.0);
 }
 
 
@@ -46,33 +59,24 @@ uint2 GetMipSize(int2 baseSize, int mip)
 }
 
 
-
-float SampleTerrainHeightChunkLocal(
-    float2 localXZ,
-    ChunkData chunk,
+float SampleTerrainHeightChunk(
+    float2 xz,
+    float2 chunkSize,
+    float heightScale,
     Texture2DArray<float> heightmap,
+    int slice,
     SamplerState linearClampSampler)
 {
-    float2 sizeXZ = chunk.boundsMax.xz - chunk.boundsMin.xz;
+    float2 safeChunkSize = max(abs(chunkSize), float2(1e-6, 1e-6));
+    float2 uv = xz / safeChunkSize;
 
-    float2 uv = (localXZ - chunk.boundsMin.xz) / sizeXZ;
+    uv = clamp(uv, float2(0.0, 0.0), float2(1.0, 1.0));
 
-    if (any(uv < 0.0) || any(uv > 1.0))
-        return -1e20;
-
-    float h = heightmap.SampleLevel(
+    return heightmap.SampleLevel(
         linearClampSampler,
-        float3(uv, chunk.heightSlice),
+        float3(uv, slice),
         0
-    );
-    
-    return h;
-}
-
-float SampleTerrainHeightChunk(float2 xz, float2 chunkSize, float heightScale, Texture2DArray<float> heightmap, int slice, SamplerState linearClampSampler)
-{
-    float2 uv = xz / chunkSize;
-    return heightmap.SampleLevel(linearClampSampler, float3(uv, slice), 0) * heightScale;
+    ) * heightScale;
 }
 
 //float SampleTerrainHeightChunk(float2 xz, float3 offset, float2 chunkSize, float heightScale, Texture2DArray<float> heightmap, int slice, SamplerState linearClampSampler)
@@ -153,7 +157,7 @@ bool TraverseHeightfieldMaxMipChunk(
     hitT = 0.0;
     hitHeight = 0.0;
 
-    float tEnterGlobal, tExitDomain;
+    float tEnterGlobal = 0, tExitDomain = 0;
     if (!GetBoundsExit(ro, rd, offset.xz, offset.xz + chunkSize, tEnterGlobal, tExitDomain))
         return false;
 
@@ -182,8 +186,9 @@ bool TraverseHeightfieldMaxMipChunk(
     float3 rayOriginInGrid = ro + rd * tStartGlobal;
     float tBase = tStartGlobal; // global ray-time of current local origin
 
-    float2 deltaT;
-    float t_x, t_y;
+    float2 deltaT = float2(1e20, 1e20);
+    float t_x = 1e20;
+    float t_y = 1e20;
     float t = 0.0;
     float tEnter = 0.0;
     float tExit = 0.0;
@@ -365,7 +370,7 @@ bool TraverseHeightfieldMaxMipShadowChunk(
     hitT = 0.0;
     hitHeight = 0.0;
 
-    float tEnterGlobal, tExitDomain;
+    float tEnterGlobal = 0, tExitDomain = 0;
     if (!GetBoundsExit(ro, rd, offset.xz, offset.xz + chunkSize, tEnterGlobal, tExitDomain))
         return false;
 
@@ -384,8 +389,9 @@ bool TraverseHeightfieldMaxMipShadowChunk(
     rayOriginInGrid = rayOriginInGrid + rd * epsilon;
     float tBase = tStartGlobal; // global ray-time of current local origin
 
-    float2 deltaT;
-    float t_x, t_y;
+    float2 deltaT = float2(1e20, 1e20);
+    float t_x = 1e20;
+    float t_y = 1e20;
     float t = 0.0;
     float tEnter = 0.0;
     float tExit = 0.0;
@@ -482,7 +488,7 @@ bool RaymarchChunk(float3 rOrigin, float3 rDirection, out float hitT, out float 
     hitT = 0.0;
     terrainHeightAtHit = 0.0;
     
-    float tEnter, tExitDomain;
+    float tEnter = 0, tExitDomain = 0;
 
     if (!GetBoundsExit(rOrigin,
     rDirection,
@@ -539,7 +545,7 @@ bool Raymarch(float3 rOrigin, float3 rDirection, out float hitT, out float terra
     hitT = 0.0;
     terrainHeightAtHit = 0.0;
     
-    float tEnter, tExitDomain;
+    float tEnter = 0, tExitDomain = 0;
 
     if (!GetBoundsExit(rOrigin,
     rDirection,
@@ -597,8 +603,8 @@ bool TraverseHeightfieldMaxMip(
 
     hitT = 0.0;
     hitHeight = 0.0;
-
-    float tEnterGlobal, tExitDomain;
+    
+    float tEnterGlobal = 0, tExitDomain = 0;
     if (!GetBoundsExit(ro, rd, offset.xz, offset.xz + chunkSize, tEnterGlobal, tExitDomain))
         return false;
 
@@ -809,7 +815,7 @@ bool TraverseHeightfieldMaxMipShadow(
     hitT = 0.0;
     hitHeight = 0.0;
 
-    float tEnterGlobal, tExitDomain;
+    float tEnterGlobal = 0, tExitDomain = 0;
     if (!GetBoundsExit(ro, rd, offset.xz, offset.xz + chunkSize, tEnterGlobal, tExitDomain))
         return false;
 

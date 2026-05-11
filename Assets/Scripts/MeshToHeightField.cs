@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Unity.Mathematics;
@@ -172,11 +173,32 @@ public class MeshToHeightField : MonoBehaviour
         //    SaveRenderTextureAsRAW(chunk.heightTexture, outputPath + chunk.heightTexture.name + ".raw");
         //}
 
+        int stride = Marshal.SizeOf<ChunkDataGPU>();
+        chunkBuffer = new ComputeBuffer(chunkData.Length, stride);
         BuildChunkBuffer();
     }
 
     private void OnDestroy()
     {
+        chunkBuffer?.Release();
+        chunkBuffer = null;
+
+        if (rtArray != null)
+        {
+            rtArray.Release();
+            Destroy(rtArray);
+            rtArray = null;
+        }
+
+        foreach (var chunk in chunks)
+        {
+            if (chunk.heightTexture != null)
+            {
+                chunk.heightTexture.Release();
+                Destroy(chunk.heightTexture);
+            }
+        }
+
         if (_heightBakeMaterial != null)
         {
             Destroy(_heightBakeMaterial);
@@ -214,9 +236,7 @@ public class MeshToHeightField : MonoBehaviour
             };  
         }
 
-        int stride = Marshal.SizeOf<ChunkDataGPU>();
 
-        chunkBuffer = new ComputeBuffer(chunkData.Length, stride);
         chunkBuffer.SetData(chunkData);
     }
 

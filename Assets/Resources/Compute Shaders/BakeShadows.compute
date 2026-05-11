@@ -103,8 +103,8 @@ bool MarchedShadows(float3 ro, float3 rd, uint seedBase, out float hitT)
     return hit;
 }
 
-[numthreads(16, 16, 4)]
-void Main (uint3 id : SV_DispatchThreadID)
+[numthreads(8, 8, 1)]
+void Main(uint3 id : SV_DispatchThreadID)
 {
     // TODO: insert actual code here!
     uint4 dims;

@@ -42,6 +42,7 @@ public class SdfRenderer : MonoBehaviour
     [Header("Terrain shading")]
     public bool optimizeTracing = true;
     public Transform terrainTransform;
+    CommandBuffer cmd;
 
     private void Start()
     {
@@ -55,20 +56,32 @@ public class SdfRenderer : MonoBehaviour
         meshToHeightfield = GetComponent<MeshToHeightField>();
         heightfieldShadowMap = GetComponent<HeightfieldShadowMap>();
         sun = RenderSettings.sun;
-    }
-    private void Update()
-    {
+
         if (!noiseGen)
         {
             Debug.LogError("Noise generator not found");
             return;
         }
 
-        CommandBuffer cmd = new CommandBuffer()
+        cmd = new CommandBuffer()
         {
             name = "My Cmd Buffer2"
         };
+        camera.AddCommandBuffer(CameraEvent.BeforeImageEffects, cmd);
+    }
+    private void OnDestroy()
+    {
+        if (cmd != null)
+        {
+            camera.RemoveCommandBuffer(CameraEvent.BeforeImageEffects, cmd);
+            cmd.Release();
+            cmd = null;
+        }
+    }
 
+    private void Update()
+    {
+        cmd.Clear();
         int kernel = marchCS.FindKernel("Main");
 
         RenderTextureDescriptor desc = new RenderTextureDescriptor();
@@ -118,8 +131,6 @@ public class SdfRenderer : MonoBehaviour
         cmd.ReleaseTemporaryRT(rt);
         cmd.ReleaseTemporaryRT(sourceRT);
 
-        camera.RemoveCommandBuffers(CameraEvent.BeforeImageEffects);
-        camera.AddCommandBuffer(CameraEvent.BeforeImageEffects, cmd);
     }
     private void TerrainParameters(int kernel, CommandBuffer cmd)
     {
@@ -151,7 +162,6 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeFloatParam(marchCS, "_OceanDepth", oceanDepth);
         cmd.SetComputeVectorParam(marchCS, "_SunDirectionIntensity", sunDirIntensity);
         cmd.SetComputeVectorParam(marchCS, "_SunColor", sunColor);
-        cmd.SetBufferData(meshToHeightfield.chunkBuffer, meshToHeightfield.chunkData);
         cmd.SetComputeBufferParam(marchCS, kernel, "_Chunks", meshToHeightfield.chunkBuffer);
         cmd.SetComputeIntParam(marchCS, "_ChunkCount", meshToHeightfield.chunkData.Length);
         cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMapArray", meshToHeightfield.rtArray);
