@@ -89,6 +89,7 @@ bool MarchedShadows(float3 ro, float3 rd, uint seedBase, out float hitT)
         float3 roLocal = mul(chunk.worldToLocal, float4(ro, 1.0)).xyz;
         float3 rdLocal = normalize(mul((float3x3) chunk.worldToLocal, lightDir));
 
+        //hit = RaymarchChunk(roLocal, rdLocal, hitT, elevation, _MaxSteps, _DistanceForHit, 2e-4, chunkSize, 1.f, chunk.boundsMin, _HeightMapArray, i, linearClampSampler);
         hit = TraverseHeightfieldMaxMipShadowChunk(roLocal, rdLocal, hitT, elevation, _DistanceForHit, _HeightMapArray, chunk.heightSlice, chunkSize, linearClampSampler, _MaxSteps, _ShadowEpsilon, chunk.boundsMin);
         if (hit)
         {
@@ -109,21 +110,36 @@ void Main(uint3 id : SV_DispatchThreadID)
     // TODO: insert actual code here!
     uint4 dims;
     _Result.GetDimensions(dims.x, dims.y, dims.z);
+    
+    if (id.x >= dims.x || id.y >= dims.y ||  id.z >= _ChunkCount)
+        return;
+    
     ChunkData chunk = _Chunks[id.z];
-    float2 chunkSize = (chunk.boundsMax.xz - chunk.boundsMin.xz) * chunk.scale.xz;
-    float2 uv = (id.xy + 0.5) / dims.xy;
-    float2 worldXZ = (uv * chunkSize) + chunk.offset.xz;
-    float height = _HeightMapArray.SampleLevel(linearClampSampler, float3(uv, chunk.heightSlice), 0) * chunk.scale.y + chunk.offset.y;
 
-    float3 worldPos = float3(worldXZ.x, height, worldXZ.y);
-    
-    float3 rd = -normalize(_SunDirection); // terrain -> sun
-    float3 ro = worldPos + rd * _ShadowEpsilon;
-    
+    float2 uv = (float2(id.xy) + 0.5) / float2(dims.x, dims.y);
 
+    float2 worldMin = chunk.offset.xz + chunk.boundsMin.xz * chunk.scale.xz;
+    float2 worldMax = chunk.offset.xz + chunk.boundsMax.xz * chunk.scale.xz;
+    float2 worldXZ = lerp(worldMin, worldMax, uv);
+
+    float heightSample = _HeightMapArray.SampleLevel(
+        linearClampSampler,
+        float3(uv, chunk.heightSlice),
+        0
+    );
+
+    float worldY = heightSample * chunk.scale.y + chunk.offset.y;
+
+    float3 worldPos = float3(worldXZ.x, worldY, worldXZ.y);
+
+    float3 rd = -normalize(_SunDirection);
+    float3 ro = worldPos + float3(0, _ShadowEpsilon, 0) + rd * _ShadowEpsilon;
+
+    uint seed = Hash(id.x + id.y * dims.x + id.z * dims.x * dims.y) + _FrameIndex;
+
+    float hitT = 0.0;
+    bool hit = MarchedShadows(ro, rd, seed, hitT);
     
-    float hitT = 0.f;
-    bool hit = MarchedShadows(ro, rd, Hash(id.x + id.y * dims.x) + _FrameIndex, hitT);
     
     float shadow = hit ? AMBIENT_INTENSITY : 1.f;
     float newShadows = shadow;

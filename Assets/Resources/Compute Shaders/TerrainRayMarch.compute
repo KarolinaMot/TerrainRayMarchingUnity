@@ -279,6 +279,9 @@ void Main(uint3 id : SV_DispatchThreadID)
         float3 finalHitPos = cameraPos + rayDirection * closestT;
 
         shadow = SampleShadowMap(finalHitPos, hitChunk);
+        
+        if(_VisualizeTerrain)
+            col = (closestElevation / 10000.f).xxx;
     }
     else
     {
