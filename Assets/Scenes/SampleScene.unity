@@ -364,8 +364,6 @@ MonoBehaviour:
   bakeLayer:
     serializedVersion: 2
     m_Bits: 4294967295
-  max: 0
-  min: 0
   rtArray: {fileID: 0}
 --- !u!114 &330585553
 MonoBehaviour:

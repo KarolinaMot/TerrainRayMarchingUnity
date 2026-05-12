@@ -88,7 +88,13 @@ bool MarchedShadows(float3 ro, float3 rd, uint seedBase, out float hitT)
         
         float3 roLocal = mul(chunk.worldToLocal, float4(ro, 1.0)).xyz;
         float3 rdLocal = normalize(mul((float3x3) chunk.worldToLocal, lightDir));
-
+        float3 min = float3(chunk.boundsMin.x, chunk.minHeight, chunk.boundsMin.z);
+        float3 max = float3(chunk.boundsMax.x, chunk.maxHeight, chunk.boundsMax.z);
+        float tExit = 0.f;
+        
+        if (!RayAABB(roLocal, rdLocal, min, max, hitT, tExit))
+            continue;
+        
         //hit = RaymarchChunk(roLocal, rdLocal, hitT, elevation, _MaxSteps, _DistanceForHit, 2e-4, chunkSize, 1.f, chunk.boundsMin, _HeightMapArray, i, linearClampSampler);
         hit = TraverseHeightfieldMaxMipShadowChunk(roLocal, rdLocal, hitT, elevation, _DistanceForHit, _HeightMapArray, chunk.heightSlice, chunkSize, linearClampSampler, _MaxSteps, _ShadowEpsilon, chunk.boundsMin);
         if (hit)

@@ -10,7 +10,7 @@ public class SdfRenderer : MonoBehaviour
     private ComputeShader marchCS;
     private Camera camera;
     private Light sun;
-    private NoiseGeneration noiseGen;
+   // private NoiseGeneration noiseGen;
     private MeshToHeightField meshToHeightfield;
     private HeightfieldShadowMap heightfieldShadowMap;
 
@@ -52,16 +52,16 @@ public class SdfRenderer : MonoBehaviour
         marchCS = Resources.Load<ComputeShader>("Compute Shaders/TerrainRayMarch");
 
         camera = GetComponent<Camera>();
-        noiseGen = GetComponent<NoiseGeneration>();
+        //noiseGen = GetComponent<NoiseGeneration>();
         meshToHeightfield = GetComponent<MeshToHeightField>();
         heightfieldShadowMap = GetComponent<HeightfieldShadowMap>();
         sun = RenderSettings.sun;
 
-        if (!noiseGen)
-        {
-            Debug.LogError("Noise generator not found");
-            return;
-        }
+        //if (!noiseGen)
+        //{
+        //    Debug.LogError("Noise generator not found");
+        //    return;
+        //}
 
         cmd = new CommandBuffer()
         {

@@ -228,8 +228,7 @@ void Main(uint3 id : SV_DispatchThreadID)
     [loop]
     for (int i = 0; i < _ChunkCount; i++)
     {
-        ChunkData chunk = _Chunks[i];
-
+        ChunkData chunk = _Chunks[i];        
         bool chunkHit = false;
         float hitT = 0.0;
         float elevation = 0.0;
@@ -239,19 +238,26 @@ void Main(uint3 id : SV_DispatchThreadID)
         float3 roLocal = mul(chunk.worldToLocal, float4(cameraPos, 1.0)).xyz;
         float3 rdLocal = normalize(mul((float3x3) chunk.worldToLocal, rayDirection));
 
+        float3 min = float3(chunk.boundsMin.x, chunk.minHeight, chunk.boundsMin.z);
+        float3 max = float3(chunk.boundsMax.x, chunk.maxHeight, chunk.boundsMax.z);
+        float tExit = 0.f;
+        
+        if (!RayAABB(roLocal, rdLocal, min, max, hitT, tExit))
+            continue;
+        
         chunkHit = TraverseHeightfieldMaxMipChunk(
-        roLocal,
-        rdLocal,
-        hitT,
-        elevation,
-        _DistanceForHit,
-        _HeightMapArray,
-        chunk.heightSlice,
-        chunkSize,
-        1.0,
-        linearClampSampler,
-        _MaxStepsOptimized,
-        chunk.boundsMin );
+            roLocal,
+            rdLocal,
+            hitT,
+            elevation,
+            _DistanceForHit,
+            _HeightMapArray,
+            chunk.heightSlice,
+            chunkSize,
+            1.0,
+            linearClampSampler,
+            _MaxStepsOptimized,
+            chunk.boundsMin );
 
         if (chunkHit)
         {

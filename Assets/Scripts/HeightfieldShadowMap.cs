@@ -101,8 +101,11 @@ public class HeightfieldShadowMap : MonoBehaviour
     {
         for (int i = 0; i < 2; i++)
         {
-            cmd.SetRenderTarget(rtShadowArray[i]);
-            cmd.ClearRenderTarget(false, true, UnityEngine.Color.clear); // RGFloat → (0,0)
+            for (int slice = 0; slice < rtShadowArray[i].volumeDepth; slice++)
+            {
+                cmd.SetRenderTarget(rtShadowArray[i], 0, CubemapFace.Unknown, slice);
+                cmd.ClearRenderTarget(false, true, Color.clear);
+            }
         }
     }
 

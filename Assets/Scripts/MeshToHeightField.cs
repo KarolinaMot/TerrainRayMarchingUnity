@@ -14,13 +14,17 @@ public struct TerrainChunk
     public Bounds bounds;
     public RenderTexture heightTexture;
     public int arrayIndex;
+    public float minHeight;
+    public float maxHeight;
 
-    public TerrainChunk(Transform t, Bounds b, RenderTexture h, int arrayIndex)
+    public TerrainChunk(Transform t, Bounds b, RenderTexture h, int arrayIndex, float minHeight, float maxHeight)
     {
         this.transform = t;
         this.bounds = b;
         this.heightTexture = h;
         this.arrayIndex = arrayIndex;
+        this.minHeight = minHeight;
+        this.maxHeight = maxHeight;
     }
 }
 
@@ -30,9 +34,9 @@ public struct ChunkDataGPU
     public Matrix4x4 worldToLocal;
     public Matrix4x4 localToWorld;
     public Vector3 boundsMin;
-    public float padding1;
+    public float minHeight;
     public Vector3 boundsMax;
-    public float padding2;
+    public float maxHeight;
     public Vector3 offset;
     public float padding3;
     public Vector3 scale;
@@ -57,7 +61,6 @@ public class MeshToHeightField : MonoBehaviour
     Shader heightBakeShader;
     public Camera BakeCamera => _bakeCamera;
 
-    public float max, min;
     public List<TerrainChunk> chunks = new List<TerrainChunk>();
 
     private Camera _bakeCamera;
@@ -131,12 +134,13 @@ public class MeshToHeightField : MonoBehaviour
                 heightTexture.filterMode = FilterMode.Bilinear;
                 heightTexture.Create();
 
-                TerrainChunk chunk = new TerrainChunk(mf.transform, mf.sharedMesh.bounds, heightTexture, chunks.Count);
+                TerrainChunk chunk = new TerrainChunk(mf.transform, mf.sharedMesh.bounds, heightTexture, chunks.Count, 0,0);
 
                 BakeHeightmap(cmd, chunk.heightTexture, rtId, mf.sharedMesh);
                 chunks.Add(chunk);
             }
         }
+
         desc.dimension = TextureDimension.Tex2DArray;
         desc.volumeDepth = chunks.Count;
         rtArray = new RenderTexture(desc);
@@ -168,10 +172,16 @@ public class MeshToHeightField : MonoBehaviour
         Graphics.ExecuteCommandBuffer(cmd);
         cmd.Release();
 
-        //foreach (TerrainChunk chunk in chunks)
-        //{
-        //    SaveRenderTextureAsRAW(chunk.heightTexture, outputPath + chunk.heightTexture.name + ".raw");
-        //}
+        for (int i = 0; i < chunks.Count; i++)
+        {
+            TerrainChunk chunk = chunks[i];
+            SaveRenderTextureAsRAW(chunk.heightTexture, outputPath + chunk.heightTexture.name + ".raw", out float minHeight,
+                 out float maxHeight);
+
+            chunk.minHeight = minHeight;
+            chunk.maxHeight = maxHeight;
+            chunks[i] = chunk;
+        }
 
         int stride = Marshal.SizeOf<ChunkDataGPU>();
         chunkBuffer = new ComputeBuffer(chunkData.Length, stride);
@@ -230,6 +240,8 @@ public class MeshToHeightField : MonoBehaviour
                 worldToLocal = chunks[i].transform.worldToLocalMatrix,
                 localToWorld = chunks[i].transform.localToWorldMatrix,
                 heightSlice = i,
+                minHeight = chunks[i].minHeight,
+                maxHeight = chunks[i].maxHeight,
                 chunkSize = new Vector2(b.size.x, b.size.z),
                 offset = chunks[i].transform.position,
                 scale = chunks[i].transform.lossyScale
@@ -240,7 +252,7 @@ public class MeshToHeightField : MonoBehaviour
         chunkBuffer.SetData(chunkData);
     }
 
-    public void SaveRenderTextureAsRAW(RenderTexture rt, string path)
+    public void SaveRenderTextureAsRAW(RenderTexture rt, string path, out float min, out float max)
     {
         Texture2D tex = new Texture2D(rt.width, rt.height, TextureFormat.RFloat, false, true);
 

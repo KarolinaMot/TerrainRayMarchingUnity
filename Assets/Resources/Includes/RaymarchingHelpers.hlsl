@@ -6,9 +6,9 @@ struct ChunkData
     float4x4 worldToLocal;
     float4x4 localToWorld;
     float3 boundsMin;
-    float padding1;
+    float minHeight;
     float3 boundsMax;
-    float padding2;
+    float maxHeight;
     float3 offset;
     float padding3;
     float3 scale;
@@ -16,6 +16,28 @@ struct ChunkData
     float2 chunkSize;
     float2 padding4;
 };
+
+bool RayAABB(
+    float3 ro,
+    float3 rd,
+    float3 bmin,
+    float3 bmax,
+    out float tEnter,
+    out float tExit)
+{
+    float3 invRd = 1.0 / rd;
+
+    float3 t0 = (bmin - ro) * invRd;
+    float3 t1 = (bmax - ro) * invRd;
+
+    float3 tmin3 = min(t0, t1);
+    float3 tmax3 = max(t0, t1);
+
+    tEnter = max(max(tmin3.x, tmin3.y), tmin3.z);
+    tExit = min(min(tmax3.x, tmax3.y), tmax3.z);
+
+    return tExit >= max(tEnter, 0.0);
+}
 
 bool GetBoundsExit(
     float3 ro,
