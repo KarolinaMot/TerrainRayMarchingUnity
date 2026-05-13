@@ -31,7 +31,7 @@ bool RayAABB(
     float3 ro,
     float3 rd,
     float3 bmin,
-    float3 bmax)
+    float3 bmax, out float tEnter)
 {
     
     float3 invRd = 1.0 / rd;
@@ -42,7 +42,7 @@ bool RayAABB(
     float3 tmin3 = min(t0, t1);
     float3 tmax3 = max(t0, t1);
 
-    float tEnter = max(max(tmin3.x, tmin3.y), tmin3.z);
+    tEnter = max(max(tmin3.x, tmin3.y), tmin3.z);
     float tExit = min(min(tmax3.x, tmax3.y), tmax3.z);
 
     return tExit >= max(tEnter, 0.0);
@@ -91,7 +91,6 @@ uint2 GetMipSize(int2 baseSize, int mip)
     return max(uint2(1u, 1u), baseSize >> mip);
 }
 
-
 float SampleTerrainHeightChunk(
     float2 xz,
     float2 chunkSize,
@@ -111,12 +110,6 @@ float SampleTerrainHeightChunk(
         0
     ) * heightScale;
 }
-
-//float SampleTerrainHeightChunk(float2 xz, float3 offset, float2 chunkSize, float heightScale, Texture2DArray<float> heightmap, int slice, SamplerState linearClampSampler)
-//{
-//    float2 uv = (xz + offset.xz) / chunkSize;
-//    return heightmap.SampleLevel(linearClampSampler, float3(uv, slice), 0) * heightScale + offset.y;
-//}
 
 float LoadMipHeight(int2 texel, int mip, Texture2D<float> heightmap)
 {

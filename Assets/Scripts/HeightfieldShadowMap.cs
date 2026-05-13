@@ -56,6 +56,8 @@ public class HeightfieldShadowMap : MonoBehaviour
             rtShadowArray[i].Create();
         }
 
+
+
         //for (int i = 0; i < 2; i++)
         //{
         //    temporalShadow[i] = new RenderTextureDescriptor(shadowMapResolution, shadowMapResolution);
@@ -165,22 +167,22 @@ public class HeightfieldShadowMap : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        CommandBuffer cmd = new CommandBuffer()
-        {
-            name = "ShadowMap creation"
-        };
+        //CommandBuffer cmd = new CommandBuffer()
+        //{
+        //    name = "ShadowMap creation"
+        //};
 
-        if (CameraMoved() || SettingsChanged() || !convergeShadows)
-        {
-            ClearTemporal(cmd);
-            convergenceCounter = 0;
-        }
+        //if (CameraMoved() || SettingsChanged() || !convergeShadows)
+        //{
+        //    ClearTemporal(cmd);
+        //    convergenceCounter = 0;
+        //}
 
-        if(convergenceCounter<convergenceLimit)
-            DispatchShadowmap(cmd);
+        //if(convergenceCounter<convergenceLimit)
+        //    DispatchShadowmap(cmd);
 
-        Graphics.ExecuteCommandBuffer(cmd);
-        cmd.Release();
+        //Graphics.ExecuteCommandBuffer(cmd);
+        //cmd.Release();
 
     }
 }
