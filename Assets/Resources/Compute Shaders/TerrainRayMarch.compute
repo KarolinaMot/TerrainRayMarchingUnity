@@ -10,6 +10,7 @@
 // with cs.SetTexture
 
 uint _VisualizeTerrain;
+uint _EnableBVH;
 
 //Ray marching parameters
 int _MaxSteps;
@@ -185,6 +186,74 @@ bool PushStack(inout int stack[BVH_STACK_SIZE], inout int stackPtr, int nodeId)
     return true;
 }
 
+bool TraceChunks(
+    float3 cameraPos,
+    float3 rayDirection,
+    out float closestT,
+    out int closestChunk,
+    out float closestElevation)
+{
+    closestT = 1e20;
+    closestChunk = -1;
+    closestElevation = 0.0;[loop]
+    for (int i = 0; i < _ChunkCount; i++)
+    {
+        ChunkData chunk = _Chunks[i];
+        bool chunkHit = false;
+        float hitT = 0.0;
+        float elevation = 0.0;
+
+        float2 chunkSize = (chunk.boundsMax - chunk.boundsMin).xz;
+
+        float3 roLocal = mul(chunk.worldToLocal, float4(cameraPos, 1.0)).xyz;
+        float3 rdLocal = normalize(mul((float3x3) chunk.worldToLocal, rayDirection));
+
+        float3 min = float3(chunk.boundsMin.x, chunk.minHeight, chunk.boundsMin.z);
+        float3 max = float3(chunk.boundsMax.x, chunk.maxHeight, chunk.boundsMax.z);
+        float tExit = 0.f;
+        
+        float tEnter;
+        if (!RayAABB(roLocal, rdLocal, min, max, tEnter))
+            continue;
+        
+        if (tEnter > closestT)
+            continue;
+        
+        chunkHit = TraverseHeightfieldMaxMipChunk(
+            roLocal,
+            rdLocal,
+            hitT,
+            elevation,
+            _DistanceForHit,
+            _HeightMapArray,
+            chunk.heightSlice,
+            chunkSize,
+            1.0,
+            linearClampSampler,
+            _MaxStepsOptimized,
+            chunk.boundsMin);
+
+        if (chunkHit)
+        {
+            float3 hitLocal = roLocal + rdLocal * hitT;
+            float3 hitWorld = mul(chunk.localToWorld, float4(hitLocal, 1.0)).xyz;
+
+            float worldHitT = length(hitWorld - cameraPos);
+
+            if (worldHitT < closestT)
+            {
+                closestT = worldHitT;
+                closestChunk = i;
+                closestElevation = elevation;
+            }
+
+        }
+    }
+    
+    return closestChunk >= 0;
+}
+
+
 bool TraceBVHHeightfield(
     float3 cameraPos,
     float3 rayDirection,
@@ -333,6 +402,8 @@ bool TraceBVHHeightfield(
 
     return closestChunk >= 0;
 }
+
+
 [numthreads(16,16,1)]
 void Main(uint3 id : SV_DispatchThreadID)
 {   
@@ -384,14 +455,27 @@ void Main(uint3 id : SV_DispatchThreadID)
     float closestT;
     int closestChunk;
     float closestElevation;
-
-    bool hit = TraceBVHHeightfield(
-    cameraPos,
-    rayDirection,
-    closestT,
-    closestChunk,
-    closestElevation    
-    );
+    bool hit = false;
+    
+    if(_EnableBVH)
+    {
+         hit = TraceBVHHeightfield(
+        cameraPos,
+        rayDirection,
+        closestT,
+        closestChunk,
+        closestElevation    
+        );
+    }
+    else
+    {
+        hit = TraceChunks(
+        cameraPos,
+        rayDirection,
+        closestT,
+        closestChunk,
+        closestElevation);
+    }
 
     if (hit)
     {
@@ -401,7 +485,8 @@ void Main(uint3 id : SV_DispatchThreadID)
         shadow = SampleShadowMap(finalHitPos, hitChunk);
 
         if (_VisualizeTerrain)
-            col = ((100.f - closestElevation) / 10000.0).xxx;
+            //col = ((100.f - closestElevation) / 10000.0).xxx;
+            col = (closestElevation / 10000.0).xxx;
     }
     
     //col.rgb *= shadow.xxx;

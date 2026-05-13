@@ -17,7 +17,7 @@ public class SdfRenderer : MonoBehaviour
 
 
     [Header("Ray-marching")]
-    public bool raymarch = true;
+    public bool enableBVH = true;
     public bool visualizeTerrain = false;
     public int maxSteps = 100;
     public int maxStepsOptimized = 100;
@@ -172,6 +172,7 @@ public class SdfRenderer : MonoBehaviour
 
         cmd.SetComputeIntParam(marchCS, "_UseRaymarchOptimization", optimizeTracing ? 1 : 0);
         cmd.SetComputeIntParam(marchCS, "_VisualizeTerrain", visualizeTerrain ? 1 : 0);
+        cmd.SetComputeIntParam(marchCS, "_EnableBVH", enableBVH ? 1 : 0);
         cmd.SetComputeMatrixParam(marchCS, "_WorldToLightClip", heightfieldShadowMap.worldToLightClip);
         cmd.SetComputeTextureParam(marchCS, kernel, "_ShadowMap", heightfieldShadowMap.rtShadowArray[Time.frameCount % 2]);
         cmd.SetComputeTextureParam(
