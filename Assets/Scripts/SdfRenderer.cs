@@ -13,6 +13,7 @@ public class SdfRenderer : MonoBehaviour
    // private NoiseGeneration noiseGen;
     private MeshToHeightField meshToHeightfield;
     private HeightfieldShadowMap heightfieldShadowMap;
+    private ChunkBVH chunkBVH;
 
 
     [Header("Ray-marching")]
@@ -55,6 +56,7 @@ public class SdfRenderer : MonoBehaviour
         //noiseGen = GetComponent<NoiseGeneration>();
         meshToHeightfield = GetComponent<MeshToHeightField>();
         heightfieldShadowMap = GetComponent<HeightfieldShadowMap>();
+        chunkBVH = GetComponent<ChunkBVH>();
         sun = RenderSettings.sun;
 
         //if (!noiseGen)
@@ -163,7 +165,9 @@ public class SdfRenderer : MonoBehaviour
         cmd.SetComputeVectorParam(marchCS, "_SunDirectionIntensity", sunDirIntensity);
         cmd.SetComputeVectorParam(marchCS, "_SunColor", sunColor);
         cmd.SetComputeBufferParam(marchCS, kernel, "_Chunks", meshToHeightfield.chunkBuffer);
+        cmd.SetComputeBufferParam(marchCS, kernel, "_Nodes", chunkBVH.bvhBuffer);
         cmd.SetComputeIntParam(marchCS, "_ChunkCount", meshToHeightfield.chunkData.Length);
+        cmd.SetComputeIntParam(marchCS, "_NodeCount", chunkBVH.nodes.Count);
         cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMapArray", meshToHeightfield.rtArray);
 
         cmd.SetComputeIntParam(marchCS, "_UseRaymarchOptimization", optimizeTracing ? 1 : 0);

@@ -71,7 +71,7 @@ public class MeshToHeightField : MonoBehaviour
     public ChunkDataGPU[] chunkData;
     public ComputeBuffer chunkBuffer;
 
-    private void Start()
+    private void Awake()
     {
         heightBakeShader = Resources.Load<Shader>("Mesh Shaders/TestBakeRed");
         mipCS = Resources.Load<ComputeShader>("Compute Shaders/MipMapGen");
@@ -190,7 +190,7 @@ public class MeshToHeightField : MonoBehaviour
 
     private void OnDestroy()
     {
-        chunkBuffer?.Release();
+        chunkBuffer.Release();
         chunkBuffer = null;
 
         if (rtArray != null)
@@ -222,12 +222,8 @@ public class MeshToHeightField : MonoBehaviour
         }
     }
 
-    private void Update()
-    {
-        BuildChunkBuffer();
-    }
-
-    private void BuildChunkBuffer()
+    //Called by BVH class
+    public void BuildChunkBuffer()
     {
         for (int i = 0; i < chunks.Count; i++)
         {
@@ -239,7 +235,7 @@ public class MeshToHeightField : MonoBehaviour
                 boundsMax = b.max,
                 worldToLocal = chunks[i].transform.worldToLocalMatrix,
                 localToWorld = chunks[i].transform.localToWorldMatrix,
-                heightSlice = i,
+                heightSlice = chunks[i].arrayIndex,
                 minHeight = chunks[i].minHeight,
                 maxHeight = chunks[i].maxHeight,
                 chunkSize = new Vector2(b.size.x, b.size.z),

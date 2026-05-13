@@ -19,7 +19,9 @@ float _DistanceForHit;
 //Heightmap and info
 Texture2DArray<float> _HeightMapArray;
 StructuredBuffer<ChunkData> _Chunks;
+StructuredBuffer<BVHNode> _Nodes;
 int _ChunkCount;
+int _NodeCount;
 
 
 Texture2DArray<float2> _ShadowMap;
@@ -172,6 +174,57 @@ float3 ReconstructWorldPos(uint2 pixel, uint2 dims)
     return world.xyz;
 }
 
+#define BVH_STACK_SIZE 64
+#define MAX_HIT_CHUNKS 32
+
+int IntersectBVHAll(
+    float3 ro,
+    float3 rd,
+    out int hitChunks[MAX_HIT_CHUNKS])
+{
+    int hitCount = 0;
+
+    int stack[BVH_STACK_SIZE];
+    int stackPtr = 0;
+
+    stack[stackPtr++] = 0; // root
+
+    while (stackPtr > 0)
+    {
+        int nodeId = stack[--stackPtr];
+
+        if (nodeId < 0 || nodeId >= _NodeCount)
+            continue;
+
+        BVHNode node = _Nodes[nodeId];
+
+        if (!RayAABB(ro, rd, node.aabbMin, node.aabbMax))
+            continue;
+
+        // Leaf
+        if (node.primCount > 0)
+        {
+            for (int i = 0; i < node.primCount; i++)
+            {
+                if (hitCount < MAX_HIT_CHUNKS)
+                {
+                    hitChunks[hitCount++] = node.firstPrim + i;
+                }
+            }
+        }
+        else
+        {
+            if (stackPtr + 2 <= BVH_STACK_SIZE)
+            {
+                stack[stackPtr++] = node.leftChild;
+                stack[stackPtr++] = node.rightChild;
+            }
+        }
+    }
+
+    return hitCount;
+}
+
 [numthreads(16,16,1)]
 void Main(uint3 id : SV_DispatchThreadID)
 {   
@@ -225,27 +278,24 @@ void Main(uint3 id : SV_DispatchThreadID)
     int closestChunk = -1;
     float closestElevation = 0.0;
 
-    [loop]
-    for (int i = 0; i < _ChunkCount; i++)
+    int hitChunks[MAX_HIT_CHUNKS];
+    int hitCount = IntersectBVHAll(cameraPos, rayDirection, hitChunks);
+    
+    if (hitCount > 0)
     {
-        ChunkData chunk = _Chunks[i];        
-        bool chunkHit = false;
-        float hitT = 0.0;
-        float elevation = 0.0;
+        for (int i = 0; i < hitCount; i++)
+        {
+            int chunkId = hitChunks[i];
+            ChunkData chunk = _Chunks[chunkId];
+            bool chunkHit = false;
+            float hitT = 0.0;
 
-        float2 chunkSize = (chunk.boundsMax - chunk.boundsMin).xz;
+            float2 chunkSize = (chunk.boundsMax - chunk.boundsMin).xz;
 
-        float3 roLocal = mul(chunk.worldToLocal, float4(cameraPos, 1.0)).xyz;
-        float3 rdLocal = normalize(mul((float3x3) chunk.worldToLocal, rayDirection));
-
-        float3 min = float3(chunk.boundsMin.x, chunk.minHeight, chunk.boundsMin.z);
-        float3 max = float3(chunk.boundsMax.x, chunk.maxHeight, chunk.boundsMax.z);
-        float tExit = 0.f;
+            float3 roLocal = mul(chunk.worldToLocal, float4(cameraPos, 1.0)).xyz;
+            float3 rdLocal = normalize(mul((float3x3) chunk.worldToLocal, rayDirection));
         
-        if (!RayAABB(roLocal, rdLocal, min, max, hitT, tExit))
-            continue;
-        
-        chunkHit = TraverseHeightfieldMaxMipChunk(
+            chunkHit = TraverseHeightfieldMaxMipChunk(
             roLocal,
             rdLocal,
             hitT,
@@ -257,43 +307,45 @@ void Main(uint3 id : SV_DispatchThreadID)
             1.0,
             linearClampSampler,
             _MaxStepsOptimized,
-            chunk.boundsMin );
+            chunk.boundsMin);
 
-        if (chunkHit)
-        {
-            float3 hitLocal = roLocal + rdLocal * hitT;
-            float3 hitWorld = mul(chunk.localToWorld, float4(hitLocal, 1.0)).xyz;
-
-            float worldHitT = length(hitWorld - cameraPos);
-
-            if (worldHitT < closestT)
+            if (chunkHit)
             {
-                closestT = worldHitT;
-                closestChunk = i;
-                closestElevation = elevation;
-                hit = true;
+                float3 hitLocal = roLocal + rdLocal * hitT;
+                float3 hitWorld = mul(chunk.localToWorld, float4(hitLocal, 1.0)).xyz;
+
+                float worldHitT = length(hitWorld - cameraPos);
+
+                if (worldHitT < closestT)
+                {
+                    closestT = worldHitT;
+                    closestChunk = chunkId;
+                    closestElevation = elevation;
+                    hit = true;
+                }
             }
+
         }
+            
+        if (hit)
+        {
+            int safeChunk = max(closestChunk, 0);
+            ChunkData hitChunk = _Chunks[safeChunk];
+
+            float3 finalHitPos = cameraPos + rayDirection * closestT;
+
+            shadow = SampleShadowMap(finalHitPos, hitChunk);
         
+            if (_VisualizeTerrain)
+                col = (closestElevation / 10000.f).xxx;
+        }
+        else
+        {
+            shadow = 1.0;
+        }
+
     }
     
-    if (hit)
-    {
-        int safeChunk = max(closestChunk, 0);
-        ChunkData hitChunk = _Chunks[safeChunk];
-
-        float3 finalHitPos = cameraPos + rayDirection * closestT;
-
-        shadow = SampleShadowMap(finalHitPos, hitChunk);
-        
-        if(_VisualizeTerrain)
-            col = ((500.f - closestElevation)/10000.f).xxx;
-    }
-    else
-    {
-        shadow = 1.0;
-    }
-
     col.rgb *= shadow.xxx;
     
     _Result[id.xy] = float4(col.rgb, 1.0);

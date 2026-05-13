@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Unity.Mathematics;
 using UnityEditor.Experimental.GraphView;
 using UnityEngine;
@@ -8,48 +9,106 @@ public class ChunkBVH : MonoBehaviour
 {
     public struct BVHNode
     {
-        public Vector3 aabbMin, aabbMax;
-        public int leftChild, rightChild;
-        public int firstPrim, primCount;
+        public Vector3 aabbMin;
+        public int leftChild;
+        public Vector3 aabbMax;
+        public int rightChild;
+        public int firstPrim;
+        public int primCount;
     }
     // Start is called once before the first execution of Update after the MonoBehaviour is created
 
     MeshToHeightField meshToHeightField;
     int roodNodeID = 0;
-    List<BVHNode> nodes;
-    int usedNodes = 0;
-    int rootNodeIdx = 0, nodesUsed = 1;
-
-
+    public List<BVHNode> nodes;
+    int rootNodeIdx = 0;
+    public ComputeBuffer bvhBuffer;
 
     void Start()
     {
         meshToHeightField = GetComponent<MeshToHeightField>();
-        nodes = new List<BVHNode>(meshToHeightField.chunks.Count*2 -1);
+        nodes = new List<BVHNode>(meshToHeightField.chunks.Count * 2 -1);
 
         BVHNode root = new BVHNode();
         root.firstPrim = 0;
         root.primCount = meshToHeightField.chunks.Count;
         root.leftChild = root.rightChild = 0;
-        nodes[rootNodeIdx] = root;
+        nodes.Add(root);
 
         UpdateNodeBounds(roodNodeID);
         Subdivide(roodNodeID);
+
+        meshToHeightField.BuildChunkBuffer();
+        int stride = Marshal.SizeOf<BVHNode>();
+        bvhBuffer = new ComputeBuffer(nodes.Count, stride);
+        bvhBuffer.SetData(nodes);
+
+    }
+
+    Bounds TransformBounds(Bounds localBounds, Matrix4x4 localToWorld)
+    {
+        Vector3 min = localBounds.min;
+        Vector3 max = localBounds.max;
+
+        Vector3[] corners =
+        {
+        new Vector3(min.x, min.y, min.z),
+        new Vector3(max.x, min.y, min.z),
+        new Vector3(min.x, max.y, min.z),
+        new Vector3(max.x, max.y, min.z),
+        new Vector3(min.x, min.y, max.z),
+        new Vector3(max.x, min.y, max.z),
+        new Vector3(min.x, max.y, max.z),
+        new Vector3(max.x, max.y, max.z),
+    };
+
+        Vector3 worldMin = new Vector3(1e30f, 1e30f, 1e30f);
+        Vector3 worldMax = new Vector3(-1e30f, -1e30f, -1e30f);
+
+        for (int i = 0; i < 8; i++)
+        {
+            Vector3 p = localToWorld.MultiplyPoint3x4(corners[i]);
+            worldMin = Vector3.Min(worldMin, p);
+            worldMax = Vector3.Max(worldMax, p);
+        }
+
+        Bounds result = new Bounds();
+        result.SetMinMax(worldMin, worldMax);
+        return result;
     }
 
     void UpdateNodeBounds(int nodeIdx)
     {
         BVHNode node = nodes[nodeIdx];
+
         node.aabbMin = new Vector3(1e30f, 1e30f, 1e30f);
         node.aabbMax = new Vector3(-1e30f, -1e30f, -1e30f);
 
         for (int first = node.firstPrim, i = 0; i < node.primCount; i++)
         {
             TerrainChunk chunk = meshToHeightField.chunks[first + i];
-            node.aabbMin = Vector3.Min(node.aabbMin, chunk.bounds.min);
-            node.aabbMax = Vector3.Max(node.aabbMax, chunk.bounds.max);
-            node.aabbMin.y = Mathf.Min(node.aabbMin.y, chunk.minHeight);
-            node.aabbMax.y = Mathf.Max(node.aabbMax.y, chunk.maxHeight);
+
+            Bounds worldBounds = TransformBounds(
+                chunk.bounds,
+                chunk.transform.localToWorldMatrix
+            );
+
+            node.aabbMin = Vector3.Min(node.aabbMin, worldBounds.min);
+            node.aabbMax = Vector3.Max(node.aabbMax, worldBounds.max);
+
+            float worldMinY = chunk.transform.TransformPoint(
+                new Vector3(0, chunk.minHeight, 0)
+            ).y;
+
+            float worldMaxY = chunk.transform.TransformPoint(
+                new Vector3(0, chunk.maxHeight, 0)
+            ).y;
+
+            if (worldMinY > worldMaxY)
+                (worldMinY, worldMaxY) = (worldMaxY, worldMinY);
+
+            node.aabbMin.y = Mathf.Min(node.aabbMin.y, worldMinY);
+            node.aabbMax.y = Mathf.Max(node.aabbMax.y, worldMaxY);
         }
 
         nodes[nodeIdx] = node;
@@ -86,8 +145,8 @@ public class ChunkBVH : MonoBehaviour
         if (leftCount == 0 || leftCount == node.primCount) return;
 
         // create child nodes
-        int leftChildIdx = usedNodes++;
-        int rightChildIdx = usedNodes++;
+        int leftChildIdx = nodes.Count;
+        int rightChildIdx = nodes.Count+1;
         node.leftChild = leftChildIdx;
         node.rightChild = rightChildIdx;
 
@@ -104,8 +163,8 @@ public class ChunkBVH : MonoBehaviour
         node.primCount = 0;
 
         nodes[nodeIdx] = node;
-        nodes[leftChildIdx] = leftChildNode;
-        nodes[rightChildIdx] = rightChildNode;
+        nodes.Add(leftChildNode);
+        nodes.Add(rightChildNode);
         UpdateNodeBounds(leftChildIdx);
         UpdateNodeBounds(rightChildIdx);
 
