@@ -66,17 +66,15 @@ public class HeightfieldShadowMap : MonoBehaviour
         //    temporalShadow[i].Create();
         //}
 
-
-
         //mapSize.x = meshToHeightfield.TargetBounds.size.x;
         //mapSize.y = meshToHeightfield.TargetBounds.size.z;
 
     }
 
-    private void OnDisable()
-    {
-        ReleaseShadowTextures();
-    }
+    //private void OnDisable()
+    //{
+    //    ReleaseShadowTextures();
+    //}
 
     private void OnDestroy()
     {
