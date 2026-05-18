@@ -21,13 +21,31 @@ public class ChunkBVH : MonoBehaviour
     MeshToHeightField meshToHeightField;
     int roodNodeID = 0;
     public List<BVHNode> nodes;
-    int rootNodeIdx = 0;
     public ComputeBuffer bvhBuffer;
 
     void Start()
     {
         meshToHeightField = GetComponent<MeshToHeightField>();
         nodes = new List<BVHNode>(meshToHeightField.chunks.Count * 2 -1);
+        int stride = Marshal.SizeOf<BVHNode>();
+        bvhBuffer = new ComputeBuffer(meshToHeightField.chunks.Count * 2 - 1, stride);
+
+        Build();
+    }
+
+    void OnDestroy()
+    {
+        if (bvhBuffer != null)
+        {
+            bvhBuffer.Release();
+            bvhBuffer = null;
+        }
+    }
+
+    void Build()
+    {
+        nodes.Clear();
+        nodes = new List<BVHNode>(meshToHeightField.chunks.Count * 2 - 1);
 
         BVHNode root = new BVHNode();
         root.firstPrim = 0;
@@ -39,8 +57,6 @@ public class ChunkBVH : MonoBehaviour
         Subdivide(roodNodeID);
 
         meshToHeightField.BuildChunkBuffer();
-        int stride = Marshal.SizeOf<BVHNode>();
-        bvhBuffer = new ComputeBuffer(nodes.Count, stride);
         bvhBuffer.SetData(nodes);
 
     }
@@ -95,20 +111,6 @@ public class ChunkBVH : MonoBehaviour
 
             node.aabbMin = Vector3.Min(node.aabbMin, worldBounds.min);
             node.aabbMax = Vector3.Max(node.aabbMax, worldBounds.max);
-
-            float worldMinY = chunk.transform.TransformPoint(
-                new Vector3(0, chunk.minHeight, 0)
-            ).y;
-
-            float worldMaxY = chunk.transform.TransformPoint(
-                new Vector3(0, chunk.maxHeight, 0)
-            ).y;
-
-            if (worldMinY > worldMaxY)
-                (worldMinY, worldMaxY) = (worldMaxY, worldMinY);
-
-            node.aabbMin.y = Mathf.Min(node.aabbMin.y, worldMinY);
-            node.aabbMax.y = Mathf.Max(node.aabbMax.y, worldMaxY);
         }
 
         nodes[nodeIdx] = node;
@@ -132,11 +134,20 @@ public class ChunkBVH : MonoBehaviour
         {
             TerrainChunk chunk = meshToHeightField.chunks[i];
 
-            if (chunk.bounds.center[axis] < splitPos)
+            Bounds worldBounds = TransformBounds(
+                chunk.bounds,
+                chunk.transform.localToWorldMatrix
+            );
+
+            if (worldBounds.center[axis] < splitPos)
+            {
                 i++;
+            }
             else
             {
-                (meshToHeightField.chunks[i], meshToHeightField.chunks[j]) = (meshToHeightField.chunks[j], meshToHeightField.chunks[i]);
+                (meshToHeightField.chunks[i], meshToHeightField.chunks[j]) =
+                    (meshToHeightField.chunks[j], meshToHeightField.chunks[i]);
+
                 j--;
             }
         }
@@ -175,6 +186,6 @@ public class ChunkBVH : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        
+        Build();
     }
 }

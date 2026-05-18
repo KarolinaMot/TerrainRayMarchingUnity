@@ -24,22 +24,6 @@ public class SdfRenderer : MonoBehaviour
     public float distanceForHit = 0.001f;
     [Space(10)]
 
-
-    [Header("Biomes")]
-    public Color grassColor;
-    public Color waterColor;
-    public Color snowColor;
-    public Color sandColor;
-    public Color forestColor;
-    public Color rockColor;
-    [Space(5)]
-    public float grassLevel;
-    public float forestLevel;
-    public float rockLevel;
-    public float snowLevel;
-    public float oceanDepth;
-    [Space(10)]
-
     [Header("Terrain shading")]
     public bool optimizeTracing = true;
     public Transform terrainTransform;
@@ -53,17 +37,11 @@ public class SdfRenderer : MonoBehaviour
         marchCS = Resources.Load<ComputeShader>("Compute Shaders/TerrainRayMarch");
 
         camera = GetComponent<Camera>();
-        //noiseGen = GetComponent<NoiseGeneration>();
         meshToHeightfield = GetComponent<MeshToHeightField>();
         heightfieldShadowMap = GetComponent<HeightfieldShadowMap>();
         chunkBVH = GetComponent<ChunkBVH>();
         sun = RenderSettings.sun;
 
-        //if (!noiseGen)
-        //{
-        //    Debug.LogError("Noise generator not found");
-        //    return;
-        //}
 
         cmd = new CommandBuffer()
         {
@@ -136,37 +114,22 @@ public class SdfRenderer : MonoBehaviour
     }
     private void TerrainParameters(int kernel, CommandBuffer cmd)
     {
-
+        
         cmd.SetComputeIntParam(marchCS, "_MaxSteps", maxSteps);
         cmd.SetComputeFloatParam(marchCS, "_DistanceForHit", distanceForHit);
 
-        Vector4 color = new Vector4(grassColor.r, grassColor.g, grassColor.b, 0.8f);
-        Vector4 waterColorRoughness = new Vector4(waterColor.r, waterColor.g, waterColor.b, 0.1f);
-        Vector4 snowColorRoughness = new Vector4(snowColor.r, snowColor.g, snowColor.b, 0.5f);
-        Vector4 sandColorRoughness = new Vector4(sandColor.r, sandColor.g, sandColor.b, 0.8f);
-        Vector4 forestColorRoughness = new Vector4(forestColor.r, forestColor.g, forestColor.b, 0.8f);
-        Vector4 rockColorRoughness = new Vector4(rockColor.r, rockColor.g, rockColor.b, 0.8f);
         Vector3 sunDir = sun.transform.forward;
         Vector3 sunColor = new Vector3(sun.color.r, sun.color.g, sun.color.b);
         Vector4 sunDirIntensity = new Vector4(sunDir.x, sunDir.y, sunDir.z, sun.intensity);
 
-        cmd.SetComputeVectorParam(marchCS, "_GrassColorRoughness", color);
-        cmd.SetComputeVectorParam(marchCS, "_WaterColorRoughness", waterColorRoughness);
-        cmd.SetComputeVectorParam(marchCS, "_SnowColorRoughness", snowColorRoughness);
-        cmd.SetComputeVectorParam(marchCS, "_SandColorRoughness", sandColorRoughness);
-        cmd.SetComputeVectorParam(marchCS, "_ForestColorRoughness", forestColorRoughness);
-        cmd.SetComputeVectorParam(marchCS, "_RockColorRoughness", rockColorRoughness);
         cmd.SetComputeFloatParam(marchCS, "_MaxStepsOptimized", maxStepsOptimized);
-        cmd.SetComputeFloatParam(marchCS, "_GrassLevel", grassLevel);
-        cmd.SetComputeFloatParam(marchCS, "_RockLevel", rockLevel);
-        cmd.SetComputeFloatParam(marchCS, "_ForestLevel", forestLevel);
-        cmd.SetComputeFloatParam(marchCS, "_SnowLevel", snowLevel);
-        cmd.SetComputeFloatParam(marchCS, "_OceanDepth", oceanDepth);
         cmd.SetComputeVectorParam(marchCS, "_SunDirectionIntensity", sunDirIntensity);
         cmd.SetComputeVectorParam(marchCS, "_SunColor", sunColor);
         cmd.SetComputeBufferParam(marchCS, kernel, "_Chunks", meshToHeightfield.chunkBuffer);
         cmd.SetComputeBufferParam(marchCS, kernel, "_Nodes", chunkBVH.bvhBuffer);
         cmd.SetComputeIntParam(marchCS, "_ChunkCount", meshToHeightfield.chunkData.Length);
+        cmd.SetComputeVectorParam(marchCS, "_AverageChunkSize", meshToHeightfield.averageChunkSize);
+        cmd.SetComputeVectorParam(marchCS, "_ChunkGridSize", meshToHeightfield.chunkGridSize);
         cmd.SetComputeIntParam(marchCS, "_NodeCount", chunkBVH.nodes.Count);
         cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMapArray", meshToHeightfield.rtArray);
 

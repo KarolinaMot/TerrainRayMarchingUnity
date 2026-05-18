@@ -88,10 +88,11 @@ bool MarchedShadows(float3 ro, float3 rd, uint seedBase, out float hitT)
         
         float3 roLocal = mul(chunk.worldToLocal, float4(ro, 1.0)).xyz;
         float3 rdLocal = normalize(mul((float3x3) chunk.worldToLocal, lightDir));
-        float3 min = float3(chunk.boundsMin.x, chunk.minHeight, chunk.boundsMin.z);
-        float3 max = float3(chunk.boundsMax.x, chunk.maxHeight, chunk.boundsMax.z);
+        float3 min = chunk.boundsMin;
+        float3 max = chunk.boundsMax;
         
-        if (!RayAABB(roLocal, rdLocal, min, max))
+        float tEnter = 0;
+        if (!RayAABB(roLocal, rdLocal, min, max, tEnter))
             continue;
         
         //hit = RaymarchChunk(roLocal, rdLocal, hitT, elevation, _MaxSteps, _DistanceForHit, 2e-4, chunkSize, 1.f, chunk.boundsMin, _HeightMapArray, i, linearClampSampler);
@@ -122,20 +123,23 @@ void Main(uint3 id : SV_DispatchThreadID)
     ChunkData chunk = _Chunks[id.z];
 
     float2 uv = (float2(id.xy) + 0.5) / float2(dims.x, dims.y);
+    
+    float3 localMin = chunk.boundsMin;
+    float3 localMax = chunk.boundsMax;
 
-    float2 worldMin = chunk.offset.xz + chunk.boundsMin.xz * chunk.scale.xz;
-    float2 worldMax = chunk.offset.xz + chunk.boundsMax.xz * chunk.scale.xz;
-    float2 worldXZ = lerp(worldMin, worldMax, uv);
+    float2 localXZ = lerp(localMin.xz, localMax.xz, uv);
 
     float heightSample = _HeightMapArray.SampleLevel(
-        linearClampSampler,
-        float3(uv, chunk.heightSlice),
-        0
-    );
+    linearClampSampler,
+    float3(uv, chunk.heightSlice),
+    0);
 
-    float worldY = heightSample * chunk.scale.y + chunk.offset.y;
+    // Build local position
+    float3 localPos = float3(localXZ.x, heightSample, localXZ.y);
 
-    float3 worldPos = float3(worldXZ.x, worldY, worldXZ.y);
+    // Convert to world
+    float3 worldPos = mul(chunk.localToWorld, float4(localPos, 1.0)).xyz;
+    
 
     float3 rd = -normalize(_SunDirection);
     float3 ro = worldPos + float3(0, _ShadowEpsilon, 0) + rd * _ShadowEpsilon;

@@ -11,6 +11,7 @@
 
 uint _VisualizeTerrain;
 uint _EnableBVH;
+uint _UseRaymarchOptimization;
 
 //Ray marching parameters
 int _MaxSteps;
@@ -23,27 +24,11 @@ StructuredBuffer<ChunkData> _Chunks;
 StructuredBuffer<BVHNode> _Nodes;
 int _ChunkCount;
 int _NodeCount;
-
+float3 _AverageChunkSize;
+int2 _ChunkGridSize;
 
 Texture2DArray<float2> _ShadowMap;
 Texture2D<float> _CameraDepthTexture;
-
-//Material values
-float4 _GrassColorRoughness;
-float4 _WaterColorRoughness;
-float4 _SnowColorRoughness;
-float4 _SandColorRoughness;
-float4 _ForestColorRoughness;
-float4 _RockColorRoughness;
-
-float _GrassLevel;
-float _ForestLevel;
-float _RockLevel;
-float _SnowLevel;
-float _OceanDepth;
-
-float _Metallic;
-uint _UseRaymarchOptimization;
 
 //Other
 float4 _SunDirectionIntensity;
@@ -52,26 +37,8 @@ float3 _SunColor;
 RWTexture2D<float4> _Result;
 Texture2D<float4> _Source;
 
-
 float4x4 _CameraToWorld;
 float4x4 _CameraInverseProjection;
-
-float4 BiomeColor(float height)
-{
-    if (height <= _OceanDepth)
-        return _WaterColorRoughness;
-    else if (height < _GrassLevel)
-        return _SandColorRoughness;
-    else if (height <= _ForestLevel)
-        return _GrassColorRoughness;
-    else if (height <= _RockLevel)
-        return _ForestColorRoughness;
-    else if (height <= _SnowLevel)
-        return _RockColorRoughness;
-    else
-        return float4(_SnowColorRoughness.rgb, 0.6f);
-}
-
 
 uint Hash(uint x)
 {
@@ -208,8 +175,8 @@ bool TraceChunks(
         float3 roLocal = mul(chunk.worldToLocal, float4(cameraPos, 1.0)).xyz;
         float3 rdLocal = normalize(mul((float3x3) chunk.worldToLocal, rayDirection));
 
-        float3 min = float3(chunk.boundsMin.x, chunk.minHeight, chunk.boundsMin.z);
-        float3 max = float3(chunk.boundsMax.x, chunk.maxHeight, chunk.boundsMax.z);
+        float3 min = chunk.boundsMin;
+        float3 max = chunk.boundsMax;
         float tExit = 0.f;
         
         float tEnter;
@@ -403,6 +370,87 @@ bool TraceBVHHeightfield(
     return closestChunk >= 0;
 }
 
+void DDAChunkTraversal(
+    float3 cameraPos,
+    float3 rayDirection,
+    out float closestT,
+    out int closestChunk,
+    out float closestElevation)
+{
+    float2 deltaT = float2(1e20, 1e20);
+    float t_x = 1e20;
+    float t_y = 1e20;
+    float t = 0.0;
+    float tEnter = 0.0;
+    float tExit = 0.0;
+
+    InitializeDDA(deltaT, t_y, t_x, _AverageChunkSize.xz, cameraPos.xz, rayDirection.xz, float2(0.f, 0.f));
+    
+    int maxChunkDDA = 100;
+    
+    [loop]
+    for (int step = 0; step < maxChunkDDA; step++)
+    {
+        float2 p = cameraPos.xz + rayDirection.xz * t;
+
+        int2 cell = int2(floor(p / _AverageChunkSize.xz));
+
+        if (cell.x < 0 || cell.y < 0 || cell.x >= _ChunkGridSize.x || cell.y >= _ChunkGridSize.y)
+            break;
+
+        int chunkIndex = cell.y * _ChunkGridSize.x + cell.x;
+
+        if (chunkIndex >= 0)
+        {
+            ChunkData chunk = _Chunks[chunkIndex];
+
+            float hitT;
+            float elevation;
+            float2 chunkSize = (chunk.boundsMax - chunk.boundsMin).xz;
+
+
+            bool chunkHit = TraverseHeightfieldMaxMipChunk(
+                    cameraPos,
+                    rayDirection,
+                    hitT,
+                    elevation,
+                    _DistanceForHit,
+                    _HeightMapArray,
+                    chunk.heightSlice,
+                    chunkSize,
+                    1.0,
+                    linearClampSampler,
+                    _MaxStepsOptimized,
+                    chunk.boundsMin
+                );
+
+            if (chunkHit && hitT < closestT)
+            {
+                closestT = hitT;
+                closestChunk = chunkIndex;
+                closestElevation = elevation;
+
+                // Optional: stop if this hit is before the next cell boundary
+                float nextCellT = min(t_x, t_y);
+                if (closestT <= nextCellT)
+                    return;
+            }
+        }
+
+        if (t_x < t_y)
+        {
+            t = t_x;
+            t_x += deltaT.x;
+        }
+        else
+        {
+            t = t_y;
+            t_y += deltaT.y;
+        }
+    }
+}
+
+
 
 [numthreads(16,16,1)]
 void Main(uint3 id : SV_DispatchThreadID)
@@ -485,11 +533,11 @@ void Main(uint3 id : SV_DispatchThreadID)
         shadow = SampleShadowMap(finalHitPos, hitChunk);
 
         if (_VisualizeTerrain)
-            //col = ((100.f - closestElevation) / 10000.0).xxx;
-            col = (closestElevation / 10000.0).xxx;
+            col = ((100.f - closestElevation) / 10000.0).xxx;
+          //  col = (closestElevation / 10000.0).xxx;
     }
     
-    //col.rgb *= shadow.xxx;
+    col.rgb *= shadow.xxx;
     
     _Result[id.xy] = float4(col.rgb, 1.0);
 

@@ -6,15 +6,11 @@ struct ChunkData
     float4x4 worldToLocal;
     float4x4 localToWorld;
     float3 boundsMin;
-    float minHeight;
+    float padding0;
     float3 boundsMax;
-    float maxHeight;
+    float padding1;
     float3 offset;
-    float padding3;
-    float3 scale;
     int heightSlice;
-    float2 chunkSize;
-    float2 padding4;
 };
 
 struct BVHNode
