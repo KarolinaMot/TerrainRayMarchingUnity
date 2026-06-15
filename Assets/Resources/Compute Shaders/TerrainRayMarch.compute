@@ -533,8 +533,8 @@ void Main(uint3 id : SV_DispatchThreadID)
         shadow = SampleShadowMap(finalHitPos, hitChunk);
 
         if (_VisualizeTerrain)
-            col = ((100.f - closestElevation) / 10000.0).xxx;
-          //  col = (closestElevation / 10000.0).xxx;
+           // col = ((100.f - closestElevation) / 10000.0).xxx;
+           col = (closestElevation / 10000.0).xxx;
     }
     
     col.rgb *= shadow.xxx;

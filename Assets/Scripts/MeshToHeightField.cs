@@ -65,6 +65,10 @@ public class MeshToHeightField : MonoBehaviour
     public ChunkDataGPU[] chunkData;
     public ComputeBuffer chunkBuffer;
 
+    private TileHeightmapGenerator tileHeightmapGenerator;
+
+
+
     private void Awake()
     {
         heightBakeShader = Resources.Load<Shader>("Mesh Shaders/TestBakeRed");

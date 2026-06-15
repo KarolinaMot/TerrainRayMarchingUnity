@@ -8,12 +8,11 @@ Shader "Hidden/MeshHeightBakeWorldY"
         {
             ZWrite On
             ZTest LEqual
-            Cull off
+            Cull Off
 
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
-            #pragma enable_d3d11_debug_symbols
             #include "UnityCG.cginc"
 
             struct appdata

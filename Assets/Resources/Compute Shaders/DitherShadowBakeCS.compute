@@ -1,0 +1,127 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel Main
+#include "../Includes/Common.hlsl"
+#include "../Includes/RaymarchingHelpers.hlsl"
+#include "../Includes/RaymarchingInputs.hlsl"
+#include "../Includes/BlueNoise.hlsl"
+
+#include "../Includes/Random.hlsl"
+
+
+RWTexture2DArray<float> _Result;
+float3 _SunDirection;
+
+int _BayerFrame;
+int _UpdateFrequency;
+
+static const uint2 Bayer4x4Pos[16] =
+{
+    uint2(0, 0), uint2(2, 2), uint2(2, 0), uint2(0, 2),
+    uint2(1, 1), uint2(3, 3), uint2(3, 1), uint2(1, 3),
+    uint2(1, 0), uint2(3, 2), uint2(3, 0), uint2(1, 2),
+    uint2(0, 1), uint2(2, 3), uint2(2, 1), uint2(0, 3)
+};
+
+uint ReverseBits(uint v, uint bits)
+{
+    uint r = 0;
+    for (uint i = 0; i < bits; i++)
+    {
+        r = (r << 1) | (v & 1u);
+        v >>= 1;
+    }
+    return r;
+}
+
+uint Log2Pow2(uint v)
+{
+    uint r = 0;
+    while (v > 1u)
+    {
+        v >>= 1;
+        r++;
+    }
+    return r;
+}
+
+uint2 GetProgressiveOffset(uint frame, uint patternSize)
+{
+    uint bits = Log2Pow2(patternSize);
+    uint totalFrames = patternSize * patternSize;
+
+    frame %= totalFrames;
+
+    uint xBits = 0;
+    uint yBits = 0;
+
+    for (uint i = 0; i < bits; i++)
+    {
+        xBits |= ((frame >> (i * 2u + 0u)) & 1u) << i;
+        yBits |= ((frame >> (i * 2u + 1u)) & 1u) << i;
+    }
+
+    return uint2(
+        ReverseBits(xBits, bits),
+        ReverseBits(yBits, bits)
+    );
+}
+
+[numthreads(8, 8, 1)]
+void Main(uint3 id : SV_DispatchThreadID)
+{
+    uint4 dims;
+    _Result.GetDimensions(dims.x, dims.y, dims.z);
+
+    uint offsetIdx = _FrameIndex % (_UpdateFrequency * _UpdateFrequency);
+    uint2 offset = uint2(
+        offsetIdx / _UpdateFrequency,
+        offsetIdx % _UpdateFrequency
+    );
+
+    uint x = id.x * _UpdateFrequency + offset.x;
+    uint y = id.y * _UpdateFrequency + offset.y;
+
+    if (x >= dims.x || y >= dims.y || id.z >= _ChunkCount)
+        return;
+   
+    ChunkData chunk = _Chunks[id.z];
+    if (chunk.heightSlice < 0)
+        return;
+
+    float2 uv = (float2(x, y) + 0.5) / float2(dims.x, dims.y);
+    
+    uint flatId = id.y * dims.x + id.x;
+    uint rng = Random::PcgHash(flatId ^ Random::XorShiftU32(_FrameIndex));
+    
+    float heightSample = _HeightMapArray.SampleLevel(
+        linearClampSampler,
+        float3(uv, chunk.heightSlice),
+        0
+    ).x;
+    
+    float2 uvHacked = uv.xy;
+    uvHacked.y = 1.0 - uvHacked.y;
+    
+    float2 pHorizontalLs = lerp(chunk.boundsMin.xz, chunk.boundsMax.xz, uvHacked);
+    float3 pLs = float3(pHorizontalLs.x, heightSample, pHorizontalLs.y);
+    
+    float3 pWs = mul(chunk.localToWorld, float4(pLs, 1.0)).xyz;
+    
+    float3 rd = normalize(-_SunDirection);
+    
+    uint seed = TerrainShadows::Hash(id.x + id.y * dims.x + id.z * dims.x * dims.y) + _FrameIndex;
+   // float2 u = STBN::SampleSTBNVec2(float2(x,y), _FrameIndex);
+    //float2 u = float2(BlueNoise::Sample(uv, dims.xy, _FrameIndex), BlueNoise::Sample(uv, dims.xy, _FrameIndex + 32));
+    float2 u = Random::UniformFloat2(rng);
+    
+    float shadowed = TerrainShadows::MarchedShadows(pWs, rd, seed, 100.f, false, u) ? 0.0 : 1.0;
+    
+    float shadowedHistory = saturate(_Result.Load(uint4(x, y, chunk.heightSlice, 0)));
+    if (isfinite(shadowedHistory))
+    {
+        shadowed = lerp(shadowed, shadowedHistory, _ShadowBlendAlpha);
+    }
+    
+    _Result[uint3(x, y, chunk.heightSlice)] = shadowed;
+}
+

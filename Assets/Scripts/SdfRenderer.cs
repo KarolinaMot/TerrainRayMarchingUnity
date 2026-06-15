@@ -1,20 +1,44 @@
-﻿using Unity.Mathematics;
+﻿using System.Runtime.InteropServices;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.XR;
 using static Unity.VisualScripting.Member;
 
+[StructLayout(LayoutKind.Sequential)]
+public struct TileDataGPU
+{
+    public Matrix4x4 worldToLocal;
+    public Matrix4x4 localToWorld;
+    public Vector3 boundsMin;
+    public uint isHighRes;
+    public Vector3 boundsMax;
+    public int heightSlice;
+}
+
 public class SdfRenderer : MonoBehaviour
 {
     private ComputeShader marchCS;
     private Camera camera;
     private Light sun;
-   // private NoiseGeneration noiseGen;
-    private MeshToHeightField meshToHeightfield;
-    private HeightfieldShadowMap heightfieldShadowMap;
-    private ChunkBVH chunkBVH;
+    private TileBVH chunkBVH;
+    private TileHeightmapGenerator tileHeightmapGenerator;
+    public readonly TileDataGPU[] chunkDataCPU;
+    private ComputeBuffer chunkDataBuffer;
 
+    private const int MAX_TILES_IN_ARRAY = 500;
+
+    private RenderTexture heightMapArray;
+    private RenderTexture shadowArray;
+
+    private ComputeShader ditherShadomapCS;
+    private ComputeShader fullShadowmapCS;
+
+    [Header("Ray-marching initialization")]
+    public int heightmapDimensions = 526;
+    public int shadowmapDimensions = 526;
+    public GameObject parentTerrain;
 
     [Header("Ray-marching")]
     public bool enableBVH = true;
@@ -33,15 +57,45 @@ public class SdfRenderer : MonoBehaviour
     {
         Camera cam = Camera.main;
         cam.depthTextureMode |= DepthTextureMode.Depth;
-
-        marchCS = Resources.Load<ComputeShader>("Compute Shaders/TerrainRayMarch");
-
+        tileHeightmapGenerator = new TileHeightmapGenerator();
+        chunkBVH = new TileBVH(MAX_TILES_IN_ARRAY);
         camera = GetComponent<Camera>();
-        meshToHeightfield = GetComponent<MeshToHeightField>();
-        heightfieldShadowMap = GetComponent<HeightfieldShadowMap>();
-        chunkBVH = GetComponent<ChunkBVH>();
+
         sun = RenderSettings.sun;
 
+        RenderTextureDescriptor desc = new RenderTextureDescriptor(heightmapDimensions, heightmapDimensions);
+        desc.dimension = TextureDimension.Tex2DArray;
+        desc.volumeDepth = MAX_TILES_IN_ARRAY;
+        desc.msaaSamples = 1;
+        desc.depthBufferBits = 0;
+        desc.graphicsFormat = GraphicsFormat.R32_SFloat;
+        desc.sRGB = false;
+        desc.useMipMap = true;
+        desc.autoGenerateMips = false;
+        desc.enableRandomWrite = true;
+        heightMapArray = new RenderTexture(desc);
+        heightMapArray.name = "MeshHeightmap_GPU_terrain";
+        heightMapArray.wrapMode = TextureWrapMode.Clamp;
+        heightMapArray.filterMode = FilterMode.Bilinear;
+        heightMapArray.Create();
+
+        desc = new RenderTextureDescriptor(shadowmapDimensions, shadowmapDimensions);
+        desc.dimension = TextureDimension.Tex2DArray;
+        desc.volumeDepth = MAX_TILES_IN_ARRAY;
+        desc.msaaSamples = 1;
+        desc.depthBufferBits = 0;
+        desc.graphicsFormat = GraphicsFormat.R32_SFloat;
+        desc.sRGB = false;
+        desc.useMipMap = false;
+        desc.autoGenerateMips = false;
+        desc.enableRandomWrite = true;
+        shadowArray = new RenderTexture(desc);
+        shadowArray.name = "MeshHeightmap_GPU_terrain";
+        shadowArray.wrapMode = TextureWrapMode.Clamp;
+        shadowArray.filterMode = FilterMode.Bilinear;
+        shadowArray.Create();
+
+        ditherShadomapCS = Resources.Load<ComputeShader>("Compute Shaders/DitherShadowBakeCS");
 
         cmd = new CommandBuffer()
         {
@@ -49,6 +103,72 @@ public class SdfRenderer : MonoBehaviour
         };
         camera.AddCommandBuffer(CameraEvent.BeforeImageEffects, cmd);
     }
+
+    void GenerateHeightmaps()
+    {
+        MeshFilter[] meshFilters = parentTerrain.GetComponentsInChildren<MeshFilter>();
+        int index = 0;
+        foreach (MeshFilter mf in meshFilters)
+        {
+            if (mf.sharedMesh != null)
+            {
+                TileDataGPU tileData = new TileDataGPU();
+                tileData = BuildChunkData(mf.gameObject, index);
+                chunkDataCPU[index] = tileData;
+
+                //HEIGHTMAP
+                {
+                    //Set chunk index value in material
+                    MeshRenderer meshRenderer = tileGO.GetComponentInChildren<MeshRenderer>();
+                    meshRenderer.GetPropertyBlock(mpb);
+                    mpb.SetInt("_ChunkIndex", index);
+                    meshRenderer.SetPropertyBlock(mpb);
+                    mpb.Clear();
+
+                    //Generate heightmap
+                    tileHeightmapGenerator.GetTileDataAndHeightmap(
+                            commandBuffer,
+                            tileGO,
+                            heightmaps.width,
+                            heightmaps.mipmapCount, heightmaps, index);
+                }
+
+                //Clear shadowmap slice
+                commandBuffer.SetRenderTarget(shadowmaps, 0, CubemapFace.Unknown, index);
+                commandBuffer.ClearRenderTarget(false, true, Color.white);
+
+
+                BakeHeightmap(cmd, chunk.heightTexture, rtId, mf.sharedMesh);
+                chunks.Add(chunk);
+                index++;
+
+            }
+        }
+
+    }
+
+    private TileDataGPU BuildChunkData(GameObject chunkGO, int index)
+    {
+        Transform tr = chunkGO.transform;
+
+        MeshFilter meshFilter = chunkGO.GetComponentInChildren<MeshFilter>();
+        Mesh mesh = meshFilter.sharedMesh;
+
+        Bounds meshB = mesh.bounds;
+
+        return new TileDataGPU
+        {
+            worldToLocal = tr.worldToLocalMatrix,
+            localToWorld = tr.localToWorldMatrix,
+
+            boundsMin = meshB.min,
+            boundsMax = meshB.max,
+
+            heightSlice = index,
+            isHighRes = chunkGO.gameObject.layer != LayerMask.NameToLayer("Low Resolution") ? 1u : 0u
+        };
+    }
+
     private void OnDestroy()
     {
         if (cmd != null)
@@ -56,6 +176,26 @@ public class SdfRenderer : MonoBehaviour
             camera.RemoveCommandBuffer(CameraEvent.BeforeImageEffects, cmd);
             cmd.Release();
             cmd = null;
+        }
+
+        if (chunkBVH != null)
+        {
+            chunkBVH.Destroy();
+            chunkBVH = null;
+        }
+
+        if (heightMapArray != null)
+        {
+            heightMapArray.Release();
+            Destroy(heightMapArray);
+            heightMapArray = null;
+        }
+
+        if (shadowArray != null)
+        {
+            shadowArray.Release();
+            Destroy(shadowArray);
+            shadowArray = null;
         }
     }
 
