@@ -1,4 +1,4 @@
-Shader "Hidden/MeshHeightBakeWorldY"
+Shader "Hidden/MeshToHeightfield"
 {
     SubShader
     {

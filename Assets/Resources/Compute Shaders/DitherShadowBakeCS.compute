@@ -11,8 +11,7 @@
 RWTexture2DArray<float> _Result;
 float3 _SunDirection;
 
-int _BayerFrame;
-int _UpdateFrequency;
+uint _UpdateFrequency;
 
 static const uint2 Bayer4x4Pos[16] =
 {
@@ -110,17 +109,13 @@ void Main(uint3 id : SV_DispatchThreadID)
     float3 rd = normalize(-_SunDirection);
     
     uint seed = TerrainShadows::Hash(id.x + id.y * dims.x + id.z * dims.x * dims.y) + _FrameIndex;
-   // float2 u = STBN::SampleSTBNVec2(float2(x,y), _FrameIndex);
-    //float2 u = float2(BlueNoise::Sample(uv, dims.xy, _FrameIndex), BlueNoise::Sample(uv, dims.xy, _FrameIndex + 32));
+
     float2 u = Random::UniformFloat2(rng);
     
     float shadowed = TerrainShadows::MarchedShadows(pWs, rd, seed, 100.f, false, u) ? 0.0 : 1.0;
     
     float shadowedHistory = saturate(_Result.Load(uint4(x, y, chunk.heightSlice, 0)));
-    if (isfinite(shadowedHistory))
-    {
-        shadowed = lerp(shadowed, shadowedHistory, _ShadowBlendAlpha);
-    }
+    shadowed = lerp(shadowed, shadowedHistory, _ShadowBlendAlpha);
     
     _Result[uint3(x, y, chunk.heightSlice)] = shadowed;
 }

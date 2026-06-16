@@ -1,0 +1,49 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel Main
+#include "../Includes/Common.hlsl"
+#include "../Includes/RaymarchingHelpers.hlsl"
+#include "../Includes/RaymarchingInputs.hlsl"
+
+
+RWTexture2DArray<float2> _Result;
+float3 _SunDirection;
+int _ChunkIndex;
+
+[numthreads(8, 8, 1)]
+void Main(uint3 id : SV_DispatchThreadID)
+{
+    uint4 dims;
+    _Result.GetDimensions(dims.x, dims.y, dims.z);
+
+    uint x = id.x;
+    uint y = id.y;
+
+    if (x >= dims.x || y >= dims.y || (uint) _ChunkIndex >= _ChunkCount)
+        return;
+   
+    ChunkData chunk = _Chunks[_ChunkIndex];
+    if (chunk.heightSlice < 0)
+        return;
+
+    float2 uv = (float2(x, y) + 0.5) / float2(dims.x, dims.y);
+        
+    float heightSample = _HeightMapArray.SampleLevel(
+        linearClampSampler,
+        float3(uv, chunk.heightSlice),
+        0
+    ).x;
+    
+    float2 uvHacked = uv.xy;
+    uvHacked.y = 1.0 - uvHacked.y;
+    
+    float2 pHorizontalLs = lerp(chunk.boundsMin.xz, chunk.boundsMax.xz, uvHacked);
+    float3 pLs = float3(pHorizontalLs.x, heightSample, pHorizontalLs.y);
+    
+    float3 pWs = mul(chunk.localToWorld, float4(pLs, 1.0)).xyz;
+    
+    float3 rd = normalize(-_SunDirection);
+
+    float shadowed = TerrainShadows::MarchedShadows(pWs, rd, -1, 0, true, 0.f) ? 0.0 : 1.0;
+    
+    _Result[uint3(x, y, _ChunkIndex)] = shadowed;
+}

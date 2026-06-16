@@ -1,4 +1,5 @@
-﻿using System.Runtime.InteropServices;
+﻿using System;
+using System.Runtime.InteropServices;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -19,14 +20,15 @@ public struct TileDataGPU
 
 public class SdfRenderer : MonoBehaviour
 {
-    private ComputeShader marchCS;
-    private Camera camera;
+    private Camera mainCamera;
     private Light sun;
     private TileBVH chunkBVH;
     private TileHeightmapGenerator tileHeightmapGenerator;
-    public readonly TileDataGPU[] chunkDataCPU;
+    private TileDataGPU[] chunkDataCPU;
     private ComputeBuffer chunkDataBuffer;
-
+    private int fullShadowKernelMain;
+    private int ditherKernelMain;
+    private int activeTileCount;
     private const int MAX_TILES_IN_ARRAY = 500;
 
     private RenderTexture heightMapArray;
@@ -34,6 +36,8 @@ public class SdfRenderer : MonoBehaviour
 
     private ComputeShader ditherShadomapCS;
     private ComputeShader fullShadowmapCS;
+    private ComputeShader terrainRaymarchCS;
+    private CommandBuffer cmd;
 
     [Header("Ray-marching initialization")]
     public int heightmapDimensions = 526;
@@ -41,27 +45,69 @@ public class SdfRenderer : MonoBehaviour
     public GameObject parentTerrain;
 
     [Header("Ray-marching")]
-    public bool enableBVH = true;
     public bool visualizeTerrain = false;
-    public int maxSteps = 100;
-    public int maxStepsOptimized = 100;
-    public float distanceForHit = 0.001f;
-    [Space(10)]
+    public bool useMaxMipOptimization = true;
+    public int maxSteps = 5000;
+    public float distanceForHit = 0.2f;
+    public float shadowEpsilon = 0.5f;
+    public int shadowUpdateFrequency = 8;
+    public float shadowSoftness = 0.2f;
+    public float shadowDarkness = 0f;
+    public float shadowBlendAlpha = 0.2f;
 
-    [Header("Terrain shading")]
-    public bool optimizeTracing = true;
-    public Transform terrainTransform;
-    CommandBuffer cmd;
 
     private void Start()
     {
-        Camera cam = Camera.main;
-        cam.depthTextureMode |= DepthTextureMode.Depth;
+        mainCamera = Camera.main;
+
+        if (mainCamera == null)
+        {
+            Debug.LogError("Camera.main is null. Make sure your camera has the MainCamera tag.");
+            return;
+        }
+
+        mainCamera.depthTextureMode |= DepthTextureMode.Depth;
+
+        chunkDataCPU = new TileDataGPU[MAX_TILES_IN_ARRAY];
         tileHeightmapGenerator = new TileHeightmapGenerator();
         chunkBVH = new TileBVH(MAX_TILES_IN_ARRAY);
-        camera = GetComponent<Camera>();
+        int stride = Marshal.SizeOf<TileDataGPU>();
+        chunkDataBuffer = new ComputeBuffer(MAX_TILES_IN_ARRAY, stride);
 
         sun = RenderSettings.sun;
+
+        if (sun == null)
+        {
+            Debug.LogError("RenderSettings.sun is null. Assign a Directional Light as the scene sun.");
+            return;
+        }
+
+        // create render textures...
+
+        ditherShadomapCS = Resources.Load<ComputeShader>("Compute Shaders/DitherShadowBakeCS");
+        fullShadowmapCS = Resources.Load<ComputeShader>("Compute Shaders/FullShadowBakeCS");
+        terrainRaymarchCS = Resources.Load<ComputeShader>("Compute Shaders/TerrainRayMarch");
+
+        if (ditherShadomapCS == null)
+        {
+            Debug.LogError("DitherShadowBakeCS not found in Resources/Compute Shaders/");
+            return;
+        }
+
+        if (fullShadowmapCS == null)
+        {
+            Debug.LogError("FullShadowBakeCS not found in Resources/Compute Shaders/");
+            return;
+        }
+
+        if (terrainRaymarchCS == null)
+        {
+            Debug.LogError("TerrainRaymarchCS not found in Resources/Compute Shaders/");
+            return;
+        }
+
+        ditherKernelMain = ditherShadomapCS.FindKernel("Main");
+        fullShadowKernelMain = fullShadowmapCS.FindKernel("Main");
 
         RenderTextureDescriptor desc = new RenderTextureDescriptor(heightmapDimensions, heightmapDimensions);
         desc.dimension = TextureDimension.Tex2DArray;
@@ -90,58 +136,87 @@ public class SdfRenderer : MonoBehaviour
         desc.autoGenerateMips = false;
         desc.enableRandomWrite = true;
         shadowArray = new RenderTexture(desc);
-        shadowArray.name = "MeshHeightmap_GPU_terrain";
+        shadowArray.name = "MeshShadowmap_GPU_terrain";
         shadowArray.wrapMode = TextureWrapMode.Clamp;
         shadowArray.filterMode = FilterMode.Bilinear;
         shadowArray.Create();
 
-        ditherShadomapCS = Resources.Load<ComputeShader>("Compute Shaders/DitherShadowBakeCS");
-
-        cmd = new CommandBuffer()
+        cmd = new CommandBuffer
         {
             name = "My Cmd Buffer2"
         };
-        camera.AddCommandBuffer(CameraEvent.BeforeImageEffects, cmd);
+
+        mainCamera.AddCommandBuffer(CameraEvent.BeforeImageEffects, cmd);
+        GenerateHeightmaps(cmd);
+        Graphics.ExecuteCommandBuffer(cmd);
     }
 
-    void GenerateHeightmaps()
+    void GenerateHeightmaps(CommandBuffer commandBuffer)
     {
+        if (parentTerrain == null)
+        {
+            Debug.LogError("parentTerrain is null. Assign it in the Inspector.");
+            return;
+        }
+
         MeshFilter[] meshFilters = parentTerrain.GetComponentsInChildren<MeshFilter>();
-        int index = 0;
+        activeTileCount = 0;
         foreach (MeshFilter mf in meshFilters)
         {
-            if (mf.sharedMesh != null)
+            if (mf.sharedMesh == null)
+                continue;
+
+            TileDataGPU tileData = new TileDataGPU();
+            tileData = BuildChunkData(mf.gameObject, activeTileCount);
+            chunkDataCPU[activeTileCount] = tileData;
+
+            //HEIGHTMAP
             {
-                TileDataGPU tileData = new TileDataGPU();
-                tileData = BuildChunkData(mf.gameObject, index);
-                chunkDataCPU[index] = tileData;
+                var tileGO = mf.gameObject;
 
-                //HEIGHTMAP
-                {
-                    //Set chunk index value in material
-                    MeshRenderer meshRenderer = tileGO.GetComponentInChildren<MeshRenderer>();
-                    meshRenderer.GetPropertyBlock(mpb);
-                    mpb.SetInt("_ChunkIndex", index);
-                    meshRenderer.SetPropertyBlock(mpb);
-                    mpb.Clear();
+                //Generate heightmap
+                tileHeightmapGenerator.GetHeightmap(
+                        commandBuffer,
+                        tileGO,
+                        heightMapArray.width,
+                        heightMapArray.mipmapCount, heightMapArray, activeTileCount);
+            }
 
-                    //Generate heightmap
-                    tileHeightmapGenerator.GetTileDataAndHeightmap(
-                            commandBuffer,
-                            tileGO,
-                            heightmaps.width,
-                            heightmaps.mipmapCount, heightmaps, index);
-                }
+            activeTileCount++;
+        }
 
-                //Clear shadowmap slice
-                commandBuffer.SetRenderTarget(shadowmaps, 0, CubemapFace.Unknown, index);
-                commandBuffer.ClearRenderTarget(false, true, Color.white);
+        commandBuffer.SetBufferData(chunkDataBuffer, chunkDataCPU);
+        chunkBVH.Build(commandBuffer, activeTileCount, chunkDataCPU);
+        TerrainParameters();
 
+        for (int i=0; i< activeTileCount; i++)
+        {
+            //Clear shadowmap slice
+            commandBuffer.SetRenderTarget(shadowArray, 0, CubemapFace.Unknown, i);
+            commandBuffer.ClearRenderTarget(false, true, Color.white);
 
-                BakeHeightmap(cmd, chunk.heightTexture, rtId, mf.sharedMesh);
-                chunks.Add(chunk);
-                index++;
+            //HIGH RES FALLBACK SHADOWMAP
+            {
+                var tileData = chunkDataCPU[i];
 
+                commandBuffer.BeginSample("Fallback shadow Bake");
+                commandBuffer.SetComputeTextureParam(fullShadowmapCS, fullShadowKernelMain, "_Result", shadowArray);
+                commandBuffer.SetComputeVectorParam(fullShadowmapCS, "_SunDirection", RenderSettings.sun.transform.forward);
+                commandBuffer.SetComputeIntParam(fullShadowmapCS, "_ChunkIndex", tileData.heightSlice);
+
+                int groupsX = Mathf.CeilToInt(shadowArray.width / 8f);
+                int groupsY = Mathf.CeilToInt(shadowArray.height / 8f);
+                int groupsZ = 1;
+
+                commandBuffer.DispatchCompute(
+                    fullShadowmapCS,
+                    fullShadowKernelMain,
+                    groupsX,
+                    groupsY,
+                    groupsZ
+                );
+
+                commandBuffer.EndSample("Fallback shadow Bake");
             }
         }
 
@@ -165,7 +240,7 @@ public class SdfRenderer : MonoBehaviour
             boundsMax = meshB.max,
 
             heightSlice = index,
-            isHighRes = chunkGO.gameObject.layer != LayerMask.NameToLayer("Low Resolution") ? 1u : 0u
+            isHighRes = 0 //actually used in the internship code, but not in this demo
         };
     }
 
@@ -173,7 +248,9 @@ public class SdfRenderer : MonoBehaviour
     {
         if (cmd != null)
         {
-            camera.RemoveCommandBuffer(CameraEvent.BeforeImageEffects, cmd);
+            if (mainCamera != null)
+                mainCamera.RemoveCommandBuffer(CameraEvent.BeforeImageEffects, cmd);
+
             cmd.Release();
             cmd = null;
         }
@@ -197,16 +274,60 @@ public class SdfRenderer : MonoBehaviour
             Destroy(shadowArray);
             shadowArray = null;
         }
+
+        if (chunkDataBuffer != null)
+        {
+            chunkDataBuffer.Release();
+            chunkDataBuffer = null;
+        }
     }
 
     private void Update()
     {
         cmd.Clear();
-        int kernel = marchCS.FindKernel("Main");
+
+        TerrainParameters();
+
+        UpdateShadows();
+
+        VisualizeShadows();
+
+    }
+
+    private void UpdateShadows()
+    {
+        cmd.BeginSample("Shadow Bake");
+
+        cmd.SetComputeTextureParam(ditherShadomapCS, ditherKernelMain, "_Result", shadowArray);
+        cmd.SetComputeVectorParam(ditherShadomapCS, "_SunDirection", RenderSettings.sun.transform.forward);
+
+        cmd.SetComputeIntParam(ditherShadomapCS, "_UpdateFrequency", shadowUpdateFrequency);
+
+        int totalFrames = shadowUpdateFrequency * shadowUpdateFrequency;
+        int groupsX = Mathf.CeilToInt(shadowArray.width / shadowUpdateFrequency / 8f);
+        int groupsY = Mathf.CeilToInt(shadowArray.height / shadowUpdateFrequency / 8f);
+        int groupsZ = activeTileCount;
+
+        cmd.DispatchCompute(
+            ditherShadomapCS,
+            ditherKernelMain,
+            groupsX,
+            groupsY,
+            groupsZ
+        );
+
+        cmd.EndSample("Shadow Bake");
+    }
+
+    private void VisualizeShadows()
+    {
+        cmd.BeginSample("Visualize shadows");
+
+        int kernel = terrainRaymarchCS.FindKernel("Main");
 
         RenderTextureDescriptor desc = new RenderTextureDescriptor();
-        desc.width = camera.pixelWidth;
-        desc.height = camera.pixelHeight;
+        desc.width = mainCamera.pixelWidth;
+        desc.height = mainCamera.pixelHeight;
         desc.msaaSamples = 1;
         desc.volumeDepth = 1;
         desc.mipCount = 1;
@@ -217,7 +338,6 @@ public class SdfRenderer : MonoBehaviour
         int rt = Shader.PropertyToID("_TmpRT");
         cmd.GetTemporaryRT(rt, desc);
         RenderTargetIdentifier rtId = new RenderTargetIdentifier(rt, 0, CubemapFace.Unknown, -1);
-        cmd.SetComputeTextureParam(marchCS, kernel, "_Result", rtId);
 
         int sourceRT = Shader.PropertyToID("_SourceRT");
         cmd.GetTemporaryRT(sourceRT, desc);
@@ -226,23 +346,24 @@ public class SdfRenderer : MonoBehaviour
         // Copy current camera target into source texture
         RenderTargetIdentifier cameraTarget = BuiltinRenderTextureType.CameraTarget;
         cmd.Blit(cameraTarget, sourceId);
+        cmd.SetComputeTextureParam(terrainRaymarchCS, kernel, "_Source", sourceId);
+        cmd.SetComputeTextureParam(terrainRaymarchCS, kernel, "_Result", rtId);
 
-        cmd.SetComputeTextureParam(marchCS, kernel, "_Source", sourceId);
+        cmd.SetComputeIntParam(terrainRaymarchCS, "_UseRaymarchOptimization", useMaxMipOptimization ? 1 : 0);
+        cmd.SetComputeIntParam(terrainRaymarchCS, "_VisualizeTerrain", visualizeTerrain ? 1 : 0);
+        cmd.SetComputeTextureParam(terrainRaymarchCS, kernel, "_CameraDepthTexture", BuiltinRenderTextureType.Depth);
 
+        Matrix4x4 cameraToWorld = mainCamera.cameraToWorldMatrix;
+        Matrix4x4 inverseProjection = GL.GetGPUProjectionMatrix(mainCamera.projectionMatrix, true).inverse;
+        Vector3 cameraWorldPos = mainCamera.transform.position;
 
-        Matrix4x4 cameraToWorld = camera.cameraToWorldMatrix;
-        Matrix4x4 inverseProjection = GL.GetGPUProjectionMatrix(camera.projectionMatrix, true).inverse;
-        Vector3 cameraWorldPos = camera.transform.position;
+        cmd.SetComputeMatrixParam(terrainRaymarchCS, "_CameraToWorld", cameraToWorld);
+        cmd.SetComputeMatrixParam(terrainRaymarchCS, "_CameraInverseProjection", inverseProjection);
+        cmd.SetComputeVectorParam(terrainRaymarchCS, "_WorldSpaceCameraPos", cameraWorldPos);
 
-        cmd.SetComputeMatrixParam(marchCS, "_CameraToWorld", cameraToWorld);
-        cmd.SetComputeMatrixParam(marchCS, "_CameraInverseProjection", inverseProjection);
-        cmd.SetComputeVectorParam(marchCS, "_WorldSpaceCameraPos", cameraWorldPos);
-
-        TerrainParameters(kernel, cmd);
-
-        cmd.DispatchCompute(marchCS, kernel,
-                Mathf.CeilToInt(camera.pixelWidth / 16.0f),
-                Mathf.CeilToInt(camera.pixelHeight / 16.0f),
+        cmd.DispatchCompute(terrainRaymarchCS, kernel,
+                Mathf.CeilToInt(mainCamera.pixelWidth / 8.0f),
+                Mathf.CeilToInt(mainCamera.pixelHeight / 8.0f),
                 1);
 
         RenderTargetIdentifier dstId = new RenderTargetIdentifier(BuiltinRenderTextureType.CameraTarget, 0, CubemapFace.Unknown, -1);
@@ -250,39 +371,23 @@ public class SdfRenderer : MonoBehaviour
 
         cmd.ReleaseTemporaryRT(rt);
         cmd.ReleaseTemporaryRT(sourceRT);
+        cmd.EndSample("Visualize shadows");
 
     }
-    private void TerrainParameters(int kernel, CommandBuffer cmd)
+
+    private void TerrainParameters()
     {
-        
-        cmd.SetComputeIntParam(marchCS, "_MaxSteps", maxSteps);
-        cmd.SetComputeFloatParam(marchCS, "_DistanceForHit", distanceForHit);
-
-        Vector3 sunDir = sun.transform.forward;
-        Vector3 sunColor = new Vector3(sun.color.r, sun.color.g, sun.color.b);
-        Vector4 sunDirIntensity = new Vector4(sunDir.x, sunDir.y, sunDir.z, sun.intensity);
-
-        cmd.SetComputeFloatParam(marchCS, "_MaxStepsOptimized", maxStepsOptimized);
-        cmd.SetComputeVectorParam(marchCS, "_SunDirectionIntensity", sunDirIntensity);
-        cmd.SetComputeVectorParam(marchCS, "_SunColor", sunColor);
-        cmd.SetComputeBufferParam(marchCS, kernel, "_Chunks", meshToHeightfield.chunkBuffer);
-        cmd.SetComputeBufferParam(marchCS, kernel, "_Nodes", chunkBVH.bvhBuffer);
-        cmd.SetComputeIntParam(marchCS, "_ChunkCount", meshToHeightfield.chunkData.Length);
-        cmd.SetComputeVectorParam(marchCS, "_AverageChunkSize", meshToHeightfield.averageChunkSize);
-        cmd.SetComputeVectorParam(marchCS, "_ChunkGridSize", meshToHeightfield.chunkGridSize);
-        cmd.SetComputeIntParam(marchCS, "_NodeCount", chunkBVH.nodes.Count);
-        cmd.SetComputeTextureParam(marchCS, kernel, "_HeightMapArray", meshToHeightfield.rtArray);
-
-        cmd.SetComputeIntParam(marchCS, "_UseRaymarchOptimization", optimizeTracing ? 1 : 0);
-        cmd.SetComputeIntParam(marchCS, "_VisualizeTerrain", visualizeTerrain ? 1 : 0);
-        cmd.SetComputeIntParam(marchCS, "_EnableBVH", enableBVH ? 1 : 0);
-        cmd.SetComputeMatrixParam(marchCS, "_WorldToLightClip", heightfieldShadowMap.worldToLightClip);
-        cmd.SetComputeTextureParam(marchCS, kernel, "_ShadowMap", heightfieldShadowMap.rtShadowArray[Time.frameCount % 2]);
-        cmd.SetComputeTextureParam(
-            marchCS,
-            kernel,
-            "_CameraDepthTexture",
-            BuiltinRenderTextureType.Depth
-        );
+        cmd.SetGlobalBuffer("_Chunks", chunkDataBuffer);
+        cmd.SetGlobalInt("_ChunkCount", activeTileCount);
+        chunkBVH.BindGlobalData(cmd);
+        cmd.SetGlobalTexture("_HeightMapArray", heightMapArray);
+        cmd.SetGlobalTexture("_ShadowMapArray", shadowArray);
+        cmd.SetGlobalInt("_MaxSteps", maxSteps);
+        cmd.SetGlobalFloat("_DistanceForHit", distanceForHit);
+        cmd.SetGlobalFloat("_ShadowEpsilon", shadowEpsilon);
+        cmd.SetGlobalFloat("_SunAngularRadius", shadowSoftness);
+        cmd.SetGlobalFloat("_ShadowBlendAlpha", shadowBlendAlpha);
+        cmd.SetGlobalFloat("_ShadowDarkness", shadowDarkness);
+        cmd.SetGlobalFloat("_ShadowmapResolution", shadowmapDimensions);
     }
 }

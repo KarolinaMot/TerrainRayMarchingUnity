@@ -21,6 +21,16 @@ struct BVHNode
     int primCount;
 };
 
+struct MarchOptions
+{
+    bool isShadow;
+    bool useMaxMipOptimization;
+
+    float seedBase;
+    float2 randomU;
+    float epsilon;
+};
+
 bool RayAABB(
     float3 ro,
     float3 rd,
@@ -160,13 +170,134 @@ void InitializeDDA(
     }
 }
 
+bool RefineHeightfieldHit(
+    float3 rayOriginInGrid,
+    float3 rd,
+    float tBase,
+    float ta,
+    float tb,
+    out float hitT,
+    out float hitHeight,
+    float distanceForHit,
+    Texture2DArray<float> heightmap,
+    int slice,
+    float2 chunkSize,
+    float heightScale,
+    SamplerState linearClampSampler,
+    float3 offset,
+    MarchOptions opt)
+{
+    hitT = 0.0;
+    hitHeight = 0.0;
 
-bool TraverseHeightfieldMaxMipChunk(
+    float3 pa = rayOriginInGrid + rd * ta;
+    float3 pb = rayOriginInGrid + rd * tb;
+
+    float ha = SampleTerrainHeightChunk(pa.xz, offset, chunkSize, heightScale, heightmap, slice, linearClampSampler);
+    float hb = SampleTerrainHeightChunk(pb.xz, offset, chunkSize, heightScale, heightmap, slice, linearClampSampler);
+
+    float ga = pa.y - ha;
+    float gb = pb.y - hb;
+
+    if (ga <= distanceForHit)
+    {
+        float refinedHitT = tBase + ta;
+
+        hitT = refinedHitT;
+        hitHeight = ha;
+        return true;
+    }
+
+    bool bracketed = ga > distanceForHit && gb <= distanceForHit;
+
+    if (!bracketed)
+    {
+        float prevT = ta;
+        float prevG = ga;
+
+        [loop]
+        for (int k = 1; k <= 4; k++)
+        {
+            float s = (float) k / 5.0;
+            float tp = lerp(ta, tb, s);
+
+            float3 pp = rayOriginInGrid + rd * tp;
+            float hp = SampleTerrainHeightChunk(pp.xz, offset, chunkSize, heightScale, heightmap, slice, linearClampSampler);
+            float gp = pp.y - hp;
+
+            if (prevG > distanceForHit && gp <= distanceForHit)
+            {
+                ta = prevT;
+                tb = tp;
+                ha = SampleTerrainHeightChunk((rayOriginInGrid + rd * ta).xz, offset, chunkSize, heightScale, heightmap, slice, linearClampSampler);
+                hb = hp;
+                ga = prevG;
+                gb = gp;
+                bracketed = true;
+                break;
+            }
+
+            prevT = tp;
+            prevG = gp;
+        }
+    }
+
+    if (!bracketed)
+        return false;
+
+    [loop]
+    for (int j = 0; j < 8; j++)
+    {
+        float tm = 0.5 * (ta + tb);
+        float3 pm = rayOriginInGrid + rd * tm;
+
+        float hm = SampleTerrainHeightChunk(
+            pm.xz,
+            offset,
+            chunkSize,
+            heightScale,
+            heightmap,
+            slice,
+            linearClampSampler
+        );
+
+        float gm = pm.y - hm;
+
+        if (gm <= distanceForHit)
+        {
+            tb = tm;
+            hb = hm;
+        }
+        else
+        {
+            ta = tm;
+            ha = hm;
+        }
+    }
+
+    float3 hitPosGrid = rayOriginInGrid + rd * tb;
+    float refinedHitTFinal = tBase + tb;
+
+    hitT = refinedHitTFinal;
+    hitHeight = hb;
+    return true;
+}
+
+bool TraverseHeightfieldMaxMip(
     float3 ro,
     float3 rd,
     out float hitT,
     out float hitHeight,
-    float distanceForHit, Texture2DArray<float> heightmap, int slice, float2 chunkSize, float heightScale, SamplerState linearClampSampler, int maxSteps, float3 offset)
+    float distanceForHit,
+    Texture2DArray<float> heightmap,
+    int slice,
+    float2 chunkSize,
+    float heightScale,
+    SamplerState linearClampSampler,
+    int maxSteps,
+    float epsilon,
+    float3 offset,
+    MarchOptions opt)
 {
     uint4 dimensions;
     heightmap.GetDimensions(0, dimensions.x, dimensions.y, dimensions.w, dimensions.z);
@@ -174,34 +305,54 @@ bool TraverseHeightfieldMaxMipChunk(
     hitT = 0.0;
     hitHeight = 0.0;
 
-    float tEnterGlobal = 0, tExitDomain = 0;
+    float tEnterGlobal = 0.0;
+    float tExitDomain = 0.0;
+
     if (!GetBoundsExit(ro, rd, offset.xz, offset.xz + chunkSize, tEnterGlobal, tExitDomain))
         return false;
-
-    hitT = max(tEnterGlobal, 0.0);
-    float maxT = tExitDomain;
-
-    float3 p0 = ro + rd * hitT;
-    float terrainY0 = SampleTerrainHeightChunk(p0.xz, offset, chunkSize, heightScale, heightmap, slice, linearClampSampler);
-    float prevH = p0.y - terrainY0;
-
-    // Start below terrain: do not render/hit underside.
-    if (prevH < 0.0)
-        return false;
-
-    float2 mip0Dimension = GetMipSize(dimensions.xy, 0);
-    float mip0cellDimension = chunkSize / float2(mip0Dimension);
-    float e = 0.8f;
-
-    int mip = max((int) dimensions.z - 8, 0);
-    uint2 mipSize = GetMipSize(dimensions.xy, mip);
-    float2 cellDimension = chunkSize / float2(mipSize);
 
     float tStartGlobal = max(tEnterGlobal, 0.0);
     float tRemaining = tExitDomain - tStartGlobal;
 
     float3 rayOriginInGrid = ro + rd * tStartGlobal;
-    float tBase = tStartGlobal; // global ray-time of current local origin
+
+    if (opt.isShadow)
+        rayOriginInGrid += rd * epsilon;
+
+    float tBase = tStartGlobal;
+
+    if (!opt.isShadow)
+    {
+        float terrainY0 = SampleTerrainHeightChunk(
+            rayOriginInGrid.xz,
+            offset,
+            chunkSize,
+            heightScale,
+            heightmap,
+            slice,
+            linearClampSampler
+        );
+
+        float prevH = rayOriginInGrid.y - terrainY0;
+
+        // For camera/terrain ray: ignore underside.
+        if (prevH < 0.0)
+            return false;
+    }
+
+    int topMip = max((int) dimensions.z - 8, 0);
+
+    int mip = opt.isShadow ? 0 : topMip;
+
+    uint2 mipSize = GetMipSize(dimensions.xy, mip);
+    float2 cellDimension = chunkSize / float2(mipSize);
+
+    float2 mip0Dimension = GetMipSize(dimensions.xy, 0);
+    float2 mip0cellDimension = chunkSize / mip0Dimension;
+
+    float e = opt.isShadow
+        ? min(mip0cellDimension.x, mip0cellDimension.y) * 0.1f
+        : 0.8f;
 
     float2 deltaT = float2(1e20, 1e20);
     float t_x = 1e20;
@@ -218,221 +369,14 @@ bool TraverseHeightfieldMaxMipChunk(
 
         float2 uv = (p.xz - offset.xz) / chunkSize;
         uv.y = 1.0 - uv.y;
-        float rawHeight = heightmap.SampleLevel(linearClampSampler, float3(uv, slice), 0).r;
-        int2 cell = clamp((int2) floor(uv * float2(mipSize)), int2(0, 0), int2(mipSize) - 1);
+
+        int2 cell = clamp(
+            (int2) floor(uv * float2(mipSize)),
+            int2(0, 0),
+            int2(mipSize) - 1
+        );
+
         float cellHeight = LoadMipHeightChunk(cell, mip, heightmap, slice) * heightScale;
-        
-        if (t_x < t_y)
-        {
-            tExit = t_x + e;
-            t_x += deltaT.x;
-        }
-        else
-        {
-            tExit = t_y + e;
-            t_y += deltaT.y;
-        }
-
-        tExit = min(tExit, tRemaining);
-
-        float y0 = rayOriginInGrid.y + rd.y * tEnter;
-        float y1 = rayOriginInGrid.y + rd.y * tExit;
-        float segMinY = min(y0, y1);
-
-        if (mip > 0)
-        {
-            if (segMinY > cellHeight + distanceForHit)
-            {
-                tEnter = tExit;
-                t = tEnter;
-            }
-            else
-            {
-                float consumed = t;
-
-                mip--;
-                mipSize = GetMipSize(dimensions.xy, mip);
-                cellDimension = chunkSize / float2(mipSize);
-
-                rayOriginInGrid = p;
-                tBase += consumed;
-                tRemaining -= consumed;
-
-                t = 0.0;
-                tEnter = 0.0;
-
-                InitializeDDA(deltaT, t_y, t_x, cellDimension, rayOriginInGrid.xz, rd.xz, offset.xz);
-            }
-        }
-        else
-        {
-            if (segMinY <= cellHeight + distanceForHit)
-            {
-                float ta = tEnter;
-                float tb = tExit;
-
-                float3 pa = rayOriginInGrid + rd * ta;
-                float3 pb = rayOriginInGrid + rd * tb;
-
-                float ha = SampleTerrainHeightChunk(pa.xz, offset, chunkSize, heightScale, heightmap, slice, linearClampSampler);
-                float hb = SampleTerrainHeightChunk(pb.xz, offset, chunkSize, heightScale, heightmap, slice, linearClampSampler);
-
-                float ga = pa.y - ha;
-                float gb = pb.y - hb;
-
-                // Already close enough at entry
-                if (ga <= distanceForHit)
-                {
-                    hitT = tBase + ta;
-                    hitHeight = ha;
-                    return true;
-                }
-
-                bool bracketed = (ga > distanceForHit && gb <= distanceForHit);
-
-                // If endpoints do not bracket, try a few probes inside the interval
-                if (!bracketed)
-                {
-                    float prevT = ta;
-                    float prevG = ga;
-
-                    [loop]
-                    for (int k = 1; k <= 4; k++)
-                    {
-                        float s = (float) k / 5.0;
-                        float tp = lerp(ta, tb, s);
-                        float3 pp = rayOriginInGrid + rd * tp;
-                        float hp = SampleTerrainHeightChunk(pp.xz, offset, chunkSize, heightScale, heightmap, slice, linearClampSampler);
-                        float gp = pp.y - hp;
-
-                        if (prevG > distanceForHit && gp <= distanceForHit)
-                        {
-                            ta = prevT;
-                            tb = tp;
-                            ha = SampleTerrainHeightChunk((rayOriginInGrid + rd * ta).xz, offset, chunkSize, heightScale, heightmap, slice, linearClampSampler);
-                            hb = hp;
-                            ga = prevG;
-                            gb = gp;
-                            bracketed = true;
-                            break;
-                        }
-
-                        prevT = tp;
-                        prevG = gp;
-                    }
-                }
-
-                if (bracketed)
-                {
-                    [loop]
-                    for (int j = 0; j < 8; j++)
-                    {
-                        float tm = 0.5 * (ta + tb);
-                        float3 pm = rayOriginInGrid + rd * tm;
-                        float hm = SampleTerrainHeightChunk(pm.xz, offset, chunkSize, heightScale, heightmap, slice, linearClampSampler);
-                        float gm = pm.y - hm;
-
-                        if (gm <= distanceForHit)
-                        {
-                            tb = tm;
-                            hb = hm;
-                        }
-                        else
-                        {
-                            ta = tm;
-                            ha = hm;
-                        }
-                    }
-
-                    hitT = tBase + tb;
-                    hitHeight = hb;
-                    return true;
-                }
-            }
-
-            // No actual hit found in this leaf interval, so advance past it
-            float consumed = tExit;
-
-            int topMip = max((int) dimensions.z - 8, 0);
-            mip = min(mip + 1, topMip);
-            mipSize = GetMipSize(dimensions.xy, mip);
-            cellDimension = chunkSize / float2(mipSize);
-
-            float3 pExit = rayOriginInGrid + rd * consumed;
-            rayOriginInGrid = pExit;
-            tBase += consumed;
-            tRemaining -= consumed;
-
-            t = 0.0;
-            tEnter = 0.0;
-            tExit = 0.0;
-
-            InitializeDDA(deltaT, t_y, t_x, cellDimension, rayOriginInGrid.xz, rd.xz, offset.xz);
-        }
-    }
-
-    return false;
-}
-
-bool TraverseHeightfieldMaxMipShadowChunk(
-    float3 ro,
-    float3 rd,
-    out float hitT,
-    out float hitHeight,
-    float distanceForHit,
-    Texture2DArray<float> heightmap, int slice, float2 chunkSize, SamplerState linearClampSampler, int maxSteps, float epsilon, float3 offset,
-    bool isHighRes, float tminLowRes, float4x4 chunkToWorld, float3 rWorldOrigin)
-{
-    uint4 dimensions;
-    heightmap.GetDimensions(0, dimensions.x, dimensions.y, dimensions.w, dimensions.z);
-
-    hitT = 0.0;
-    hitHeight = 0.0;
-
-    float tEnterGlobal = 0, tExitDomain = 0;
-    if (!GetBoundsExit(ro, rd, offset.xz, offset.xz + chunkSize, tEnterGlobal, tExitDomain))
-        return false;
-
-    float2 mip0Dimension = GetMipSize(dimensions.xy, 0);
-    float2 mip0cellDimension = chunkSize / float2(mip0Dimension);
-    float e = min(mip0cellDimension.x, mip0cellDimension.y) * 0.1f;
-    //float e = 40.f;
-    
-    //int mip = max((int) dimensions.z - 2, 0);
-    int mip = 0;
-    uint2 mipSize = GetMipSize(dimensions.xy, mip);
-    float2 cellDimension = chunkSize / float2(mipSize);
-
-    float tStartGlobal = max(tEnterGlobal, 0.0);
-    float tRemaining = tExitDomain - tStartGlobal;
-
-    float3 rayOriginInGrid = ro + rd * tStartGlobal;
-    rayOriginInGrid = rayOriginInGrid + rd * epsilon;
-    float tBase = tStartGlobal; // global ray-time of current local origin
-
-    float2 deltaT = float2(1e20, 1e20);
-    float t_x = 1e20;
-    float t_y = 1e20;
-    float t = 0.0;
-    float tEnter = 0.0;
-    float tExit = 0.0;
-
-    InitializeDDA(deltaT, t_y, t_x, cellDimension, rayOriginInGrid.xz, rd.xz, offset.xz);
-       
-    for (int i = 0; i < maxSteps && t < tRemaining; i++)
-    {
-        float3 p = rayOriginInGrid + rd * t;
-
-        bool discardLowRes = false;
-
-        float3 hitPosWorld = mul(chunkToWorld, float4(p, 1.0)).xyz;
-        float hitTWorld = distance(rWorldOrigin, hitPosWorld);
-        discardLowRes = hitTWorld < tminLowRes;
-        
-        float2 uv = (p.xz - offset.xz) / chunkSize;
-        uv.y = 1 - uv.y;
-        int2 cell = clamp((int2) floor(uv * float2(mipSize)), int2(0, 0), int2(mipSize) - 1);
-        float cellHeight = LoadMipHeightChunk(cell, mip, heightmap, slice);
 
         if (t_x < t_y)
         {
@@ -472,6 +416,7 @@ bool TraverseHeightfieldMaxMipShadowChunk(
 
                 t = 0.0;
                 tEnter = 0.0;
+                tExit = 0.0;
 
                 InitializeDDA(deltaT, t_y, t_x, cellDimension, rayOriginInGrid.xz, rd.xz, offset.xz);
             }
@@ -504,123 +449,34 @@ bool TraverseHeightfieldMaxMipShadowChunk(
             
             if (segMinY <= cellHeight + distanceForHit)
             {
-                float ta = tEnter;
-                float tb = tExit;
-
-                float3 pa = rayOriginInGrid + rd * ta;
-                float3 pb = rayOriginInGrid + rd * tb;
-
-                float ha = SampleTerrainHeightChunk(pa.xz, offset, chunkSize, 1.f, heightmap, slice, linearClampSampler);
-                float hb = SampleTerrainHeightChunk(pb.xz, offset, chunkSize, 1.f, heightmap, slice, linearClampSampler);
-
-                float ga = pa.y - ha;
-                float gb = pb.y - hb;
-
-                // Already close enough at entry
-                if (ga <= distanceForHit)
+                if (RefineHeightfieldHit(
+                    rayOriginInGrid,
+                    rd,
+                    tBase,
+                    tEnter,
+                    tExit,
+                    hitT,
+                    hitHeight,
+                    distanceForHit,
+                    heightmap,
+                    slice,
+                    chunkSize,
+                    heightScale,
+                    linearClampSampler,
+                    offset,
+                    opt))
                 {
-                    float refinedHitT = tBase + ta;
-                    float3 hitPosGrid = rayOriginInGrid + rd * ta;
-                    float3 hitPosWorld = mul(chunkToWorld, float4(hitPosGrid, 1.0)).xyz;
-
-                    float hitTWorld = distance(rWorldOrigin, hitPosWorld);
-                    bool discardLowRes = hitTWorld < tminLowRes;
-
-                    if (!discardLowRes)
-                    {
-                        hitT = refinedHitT;
-                        hitHeight = ha;
-                        return true;
-                    }
-                }
-
-                bool bracketed = (ga > distanceForHit && gb <= distanceForHit);
-
-                // If endpoints do not bracket, try a few probes inside the interval
-                if (!bracketed)
-                {
-                    float prevT = ta;
-                    float prevG = ga;
-
-                    [loop]
-                    for (int k = 1; k <= 4; k++)
-                    {
-                        float s = (float) k / 5.0;
-                        float tp = lerp(ta, tb, s);
-                        float3 pp = rayOriginInGrid + rd * tp;
-                        float hp = SampleTerrainHeightChunk(pp.xz, offset, chunkSize, 1.f, heightmap, slice, linearClampSampler);
-                        float gp = pp.y - hp;
-
-                        if (prevG > distanceForHit && gp <= distanceForHit)
-                        {
-                            ta = prevT;
-                            tb = tp;
-                            ha = SampleTerrainHeightChunk((rayOriginInGrid + rd * ta).xz, offset, chunkSize, 1.f, heightmap, slice, linearClampSampler);
-                            hb = hp;
-                            ga = prevG;
-                            gb = gp;
-                            bracketed = true;
-                            break;
-                        }
-
-                        prevT = tp;
-                        prevG = gp;
-                    }
-                }
-
-                if (bracketed)
-                {
-                     [loop]
-                    for (int j = 0; j < 8; j++)
-                    {
-                        float tm = 0.5 * (ta + tb);
-                        float3 pm = rayOriginInGrid + rd * tm;
-                        float hm = SampleTerrainHeightChunk(
-                            pm.xz,
-                            offset,
-                            chunkSize,
-                            1.f,
-                            heightmap,
-                            slice,
-                            linearClampSampler
-                        );
-
-                        float gm = pm.y - hm;
-
-                        if (gm <= distanceForHit)
-                        {
-                            tb = tm;
-                            hb = hm;
-                        }
-                        else
-                        {
-                            ta = tm;
-                            ha = hm;
-                        }
-                    }
-
-                    float refinedHitT = tBase + tb;
-                    float3 hitPosGrid = rayOriginInGrid + rd * tb;
-                    float3 hitPosWorld = mul(chunkToWorld, float4(hitPosGrid, 1.0)).xyz;
-
-                    float hitTWorld = distance(rWorldOrigin, hitPosWorld);
-                    bool discardLowRes = hitTWorld < tminLowRes;
-
-                    if (!discardLowRes)
-                    {
-                        hitT = refinedHitT;
-                        hitHeight = hb;
-                        return true;
-                    }
-
+                    return true;
                 }
             }
-            
-            
-            // Missed in this leaf segment, so advance past it
+
             float consumed = tExit;
 
-            mip++;
+            if (opt.isShadow)
+                mip = min(mip + 1, topMip);
+            else
+                mip = min(mip + 1, topMip);
+
             mipSize = GetMipSize(dimensions.xy, mip);
             cellDimension = chunkSize / float2(mipSize);
 
@@ -637,15 +493,13 @@ bool TraverseHeightfieldMaxMipShadowChunk(
         }
     }
 
-
     return false;
 }
 
 
 bool RaymarchChunk(float3 rOrigin, float3 rDirection, out float hitT, out float terrainHeightAtHit, float maxSteps,
     float distanceForHit, float maxStepPrecision, float2 chunkSize, float heightScale, float3 offset,
-    Texture2DArray<float> heightmap, int slice, SamplerState linearClampSampler,
-    bool isHighRes, float tminLowRes, float4x4 chunkToWorld, float3 rWorldOrigin)
+    Texture2DArray<float> heightmap, int slice, SamplerState linearClampSampler)
 {
     hitT = 0.0;
     terrainHeightAtHit = 0.0;
@@ -668,23 +522,14 @@ bool RaymarchChunk(float3 rOrigin, float3 rDirection, out float hitT, out float 
     float terrainY0 = SampleTerrainHeightChunk(p0.xz, offset, chunkSize, heightScale, heightmap, slice, linearClampSampler);
     float prevH = p0.y - terrainY0;
 
-    // Start below terrain: do not render/hit underside.
-    //if (prevH < 0.0)
-    //    return false;
-
     for (int i = 0; i < maxSteps && hitT < maxT; i++)
     {
         float3 p = rOrigin + rDirection * hitT;
 
         float terrainY = SampleTerrainHeightChunk(p.xz, offset, chunkSize, heightScale, heightmap, slice, linearClampSampler);
         float h = p.y - terrainY;
-
-        float3 hitPosWorld = mul(chunkToWorld, float4(p, 1.0)).xyz;
-        float hitTWorld = distance(rWorldOrigin, hitPosWorld);
-        bool discardLowRes = hitTWorld < tminLowRes;
        
-        // Only accept crossing from above to the terrain surface.
-        if (h <= distanceForHit && !discardLowRes)
+        if (h <= distanceForHit)
         {
             terrainHeightAtHit = terrainY;
             return true;

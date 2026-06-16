@@ -2,7 +2,7 @@
 
 Texture2DArray<float> _SrcTex;
 SamplerState sampler_SrcTex;
-RWTexture2DArray<float> _DstTex;
+RWTexture2D<float> _DstTex;
 
 int _SrcMipSizeX;
 int _SrcMipSizeY;
@@ -42,5 +42,5 @@ void ReduceMaxMip(uint3 id : SV_DispatchThreadID)
     float h01 = _SrcTex.Load(int4(src01, _SrcSlice, _SrcMip));
     float h11 = _SrcTex.Load(int4(src11, _SrcSlice, _SrcMip));
 
-    _DstTex[uint3(dst, _DstSlice)] = max(max(h00, h10), max(h01, h11));
+    _DstTex[dst] = max(max(h00, h10), max(h01, h11));
 }

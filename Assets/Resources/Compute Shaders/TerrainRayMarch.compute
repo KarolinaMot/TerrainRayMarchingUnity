@@ -1,33 +1,14 @@
 ﻿// Each #kernel tells which function to compile; you can have many kernels
 #pragma kernel Main
-#pragma enable_d3d11_debug_symbols
 
-#include "../Includes/Noise.hlsl"
-#include "../Includes/BlueNoise.hlsl"
-#include "../Includes/PBR.hlsl"
 #include "../Includes/RaymarchingHelpers.hlsl"
+#include "../Includes/RaymarchingInputs.hlsl"
+
 // Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
 
 uint _VisualizeTerrain;
-uint _EnableBVH;
-uint _UseRaymarchOptimization;
 
-//Ray marching parameters
-int _MaxSteps;
-int _MaxStepsOptimized;
-float _DistanceForHit;
-
-//Heightmap and info
-Texture2DArray<float> _HeightMapArray;
-StructuredBuffer<ChunkData> _Chunks;
-StructuredBuffer<BVHNode> _Nodes;
-int _ChunkCount;
-int _NodeCount;
-float3 _AverageChunkSize;
-int2 _ChunkGridSize;
-
-Texture2DArray<float2> _ShadowMap;
 Texture2D<float> _CameraDepthTexture;
 
 //Other
@@ -39,90 +20,6 @@ Texture2D<float4> _Source;
 
 float4x4 _CameraToWorld;
 float4x4 _CameraInverseProjection;
-
-uint Hash(uint x)
-{
-    x ^= x >> 16;
-    x *= 0x7feb352du;
-    x ^= x >> 15;
-    x *= 0x846ca68bu;
-    x ^= x >> 16;
-    return x;
-}
-
-float Rand(inout uint seed)
-{
-    seed = Hash(seed);
-    // Take lower 24 bits and normalize
-    return (seed & 0x00FFFFFFu) / 16777216.0f; // 2^24
-}
-
-void CreateCoordinateSystem(const float3 N, out float3 Nt, out float3 Nb)
-{
-    if (abs(N.x) > abs(N.y))
-        Nt = float3(N.z, 0, -N.x) / sqrt(N.x * N.x + N.z * N.z);
-    else
-        Nt = float3(0, -N.z, N.y) / sqrt(N.y * N.y + N.z * N.z);
-    Nb = cross(N, Nt);
-}
-
-float3 CosineSampleHemisphere(float u1, float u2)
-{
-    float r = sqrt(u1);
-    float phi = 2.0 * sPi * u2;
-    float x = r * cos(phi);
-    float y = r * sin(phi);
-    float z = sqrt(1.0 - u1);
-    return float3(x, y, z);
-}
-
-void MakeOrthonormalBasis(float3 n, out float3 t, out float3 b)
-{
-    float3 up = (abs(n.z) < 0.999f) ? float3(0, 0, 1) : float3(0, 1, 0);
-    t = normalize(cross(up, n));
-    b = cross(n, t);
-}
-
-float3 SampleConeDirection(float3 axis, float cosMax, float2 u)
-{
-    float cosTheta = lerp(cosMax, 1.0f, u.x);
-    float sinTheta = sqrt(max(0.0f, 1.0f - cosTheta * cosTheta));
-    float phi = 2.0f * sPi * u.y;
-
-    float3 t, b;
-    MakeOrthonormalBasis(axis, t, b);
-
-    return normalize(t * (cos(phi) * sinTheta) + b * (sin(phi) * sinTheta) + axis * cosTheta);
-}
-
-
-float SampleShadowMap(float3 worldPos, ChunkData chunk)
-{
-    float result = 1.0;
-
-    float3 localPos = mul(chunk.worldToLocal, float4(worldPos, 1.0)).xyz;
-
-    float2 denom = max(
-        abs(chunk.boundsMax.xz - chunk.boundsMin.xz),
-        float2(1e-6, 1e-6)
-    );
-
-    float2 uv = (localPos.xz - chunk.boundsMin.xz) / denom;
-
-    if (all(uv >= 0.0) && all(uv <= 1.0))
-    {
-        float2 value = _ShadowMap.SampleLevel(
-            linearClampSampler,
-            float3(uv, chunk.heightSlice),
-            0
-        );
-
-        if (value.y > 1e-6)
-            result = saturate(value.x / value.y);
-    }
-
-    return result;
-}
 
 float3 ReconstructWorldPos(uint2 pixel, uint2 dims)
 {
@@ -142,317 +39,7 @@ float3 ReconstructWorldPos(uint2 pixel, uint2 dims)
     return world.xyz;
 }
 
-#define BVH_STACK_SIZE 64
-
-bool PushStack(inout int stack[BVH_STACK_SIZE], inout int stackPtr, int nodeId)
-{
-    if (stackPtr >= BVH_STACK_SIZE)
-        return false;
-
-    stack[stackPtr++] = nodeId;
-    return true;
-}
-
-bool TraceChunks(
-    float3 cameraPos,
-    float3 rayDirection,
-    out float closestT,
-    out int closestChunk,
-    out float closestElevation)
-{
-    closestT = 1e20;
-    closestChunk = -1;
-    closestElevation = 0.0;[loop]
-    for (int i = 0; i < _ChunkCount; i++)
-    {
-        ChunkData chunk = _Chunks[i];
-        bool chunkHit = false;
-        float hitT = 0.0;
-        float elevation = 0.0;
-
-        float2 chunkSize = (chunk.boundsMax - chunk.boundsMin).xz;
-
-        float3 roLocal = mul(chunk.worldToLocal, float4(cameraPos, 1.0)).xyz;
-        float3 rdLocal = normalize(mul((float3x3) chunk.worldToLocal, rayDirection));
-
-        float3 min = chunk.boundsMin;
-        float3 max = chunk.boundsMax;
-        float tExit = 0.f;
-        
-        float tEnter;
-        if (!RayAABB(roLocal, rdLocal, min, max, tEnter))
-            continue;
-        
-        if (tEnter > closestT)
-            continue;
-        
-        chunkHit = TraverseHeightfieldMaxMipChunk(
-            roLocal,
-            rdLocal,
-            hitT,
-            elevation,
-            _DistanceForHit,
-            _HeightMapArray,
-            chunk.heightSlice,
-            chunkSize,
-            1.0,
-            linearClampSampler,
-            _MaxStepsOptimized,
-            chunk.boundsMin);
-
-        if (chunkHit)
-        {
-            float3 hitLocal = roLocal + rdLocal * hitT;
-            float3 hitWorld = mul(chunk.localToWorld, float4(hitLocal, 1.0)).xyz;
-
-            float worldHitT = length(hitWorld - cameraPos);
-
-            if (worldHitT < closestT)
-            {
-                closestT = worldHitT;
-                closestChunk = i;
-                closestElevation = elevation;
-            }
-
-        }
-    }
-    
-    return closestChunk >= 0;
-}
-
-
-bool TraceBVHHeightfield(
-    float3 cameraPos,
-    float3 rayDirection,
-    out float closestT,
-    out int closestChunk,
-    out float closestElevation)
-{
-    closestT = 1e20;
-    closestChunk = -1;
-    closestElevation = 0.0;
-
-    int stack[BVH_STACK_SIZE];
-    int stackPtr = 0;
-
-    PushStack(stack, stackPtr, 0);
-
-    while (stackPtr > 0)
-    {
-        int nodeId = stack[--stackPtr];
-
-        if (nodeId < 0 || nodeId >= _NodeCount)
-            continue;
-
-        BVHNode node = _Nodes[nodeId];
-
-        float tEnter;
-        if (!RayAABB(cameraPos, rayDirection, node.aabbMin, node.aabbMax, tEnter))
-            continue;
-
-        if (tEnter > closestT)
-            continue;
-
-        if (node.primCount > 0)
-        {
-            for (int p = 0; p < node.primCount; p++)
-            {
-                int chunkId = node.firstPrim + p;
-
-                if (chunkId < 0 || chunkId >= _ChunkCount)
-                    continue;
-
-                ChunkData chunk = _Chunks[chunkId];
-
-                float3 roLocal = mul(chunk.worldToLocal, float4(cameraPos, 1.0)).xyz;
-                float3 rdLocal = normalize(mul((float3x3) chunk.worldToLocal, rayDirection));
-
-                float hitT;
-                float elevation;
-
-                float2 chunkSize = (chunk.boundsMax - chunk.boundsMin).xz;
-
-                bool chunkHit = TraverseHeightfieldMaxMipChunk(
-                    roLocal,
-                    rdLocal,
-                    hitT,
-                    elevation,
-                    _DistanceForHit,
-                    _HeightMapArray,
-                    chunk.heightSlice,
-                    chunkSize,
-                    1.0,
-                    linearClampSampler,
-                    _MaxStepsOptimized,
-                    chunk.boundsMin
-                );
-
-                if (!chunkHit)
-                    continue;
-
-                float3 hitLocal = roLocal + rdLocal * hitT;
-                float3 hitWorld = mul(chunk.localToWorld, float4(hitLocal, 1.0)).xyz;
-
-                float worldHitT = length(hitWorld - cameraPos);
-
-                if (worldHitT < closestT)
-                {
-                    closestT = worldHitT;
-                    closestChunk = chunkId;
-                    closestElevation = elevation;
-                }
-            }
-
-            continue;
-        }
-
-        int left = node.leftChild;
-        int right = node.rightChild;
-
-        bool hitLeft = false;
-        bool hitRight = false;
-
-        float tLeft = 1e20;
-        float tRight = 1e20;
-
-        if (left >= 0 && left < _NodeCount)
-        {
-            BVHNode leftNode = _Nodes[left];
-            hitLeft = RayAABB(
-                cameraPos,
-                rayDirection,
-                leftNode.aabbMin,
-                leftNode.aabbMax,
-                tLeft
-            );
-
-            hitLeft = hitLeft && tLeft <= closestT;
-        }
-
-        if (right >= 0 && right < _NodeCount)
-        {
-            BVHNode rightNode = _Nodes[right];
-            hitRight = RayAABB(
-                cameraPos,
-                rayDirection,
-                rightNode.aabbMin,
-                rightNode.aabbMax,
-                tRight
-            );
-
-            hitRight = hitRight && tRight <= closestT;
-        }
-
-        // Stack is LIFO, so push farther first, nearer second.
-        if (hitLeft && hitRight)
-        {
-            if (tLeft < tRight)
-            {
-                PushStack(stack, stackPtr, right);
-                PushStack(stack, stackPtr, left);
-            }
-            else
-            {
-                PushStack(stack, stackPtr, left);
-                PushStack(stack, stackPtr, right);
-            }
-        }
-        else if (hitLeft)
-        {
-            PushStack(stack, stackPtr, left);
-        }
-        else if (hitRight)
-        {
-            PushStack(stack, stackPtr, right);
-        }
-    }
-
-    return closestChunk >= 0;
-}
-
-void DDAChunkTraversal(
-    float3 cameraPos,
-    float3 rayDirection,
-    out float closestT,
-    out int closestChunk,
-    out float closestElevation)
-{
-    float2 deltaT = float2(1e20, 1e20);
-    float t_x = 1e20;
-    float t_y = 1e20;
-    float t = 0.0;
-    float tEnter = 0.0;
-    float tExit = 0.0;
-
-    InitializeDDA(deltaT, t_y, t_x, _AverageChunkSize.xz, cameraPos.xz, rayDirection.xz, float2(0.f, 0.f));
-    
-    int maxChunkDDA = 100;
-    
-    [loop]
-    for (int step = 0; step < maxChunkDDA; step++)
-    {
-        float2 p = cameraPos.xz + rayDirection.xz * t;
-
-        int2 cell = int2(floor(p / _AverageChunkSize.xz));
-
-        if (cell.x < 0 || cell.y < 0 || cell.x >= _ChunkGridSize.x || cell.y >= _ChunkGridSize.y)
-            break;
-
-        int chunkIndex = cell.y * _ChunkGridSize.x + cell.x;
-
-        if (chunkIndex >= 0)
-        {
-            ChunkData chunk = _Chunks[chunkIndex];
-
-            float hitT;
-            float elevation;
-            float2 chunkSize = (chunk.boundsMax - chunk.boundsMin).xz;
-
-
-            bool chunkHit = TraverseHeightfieldMaxMipChunk(
-                    cameraPos,
-                    rayDirection,
-                    hitT,
-                    elevation,
-                    _DistanceForHit,
-                    _HeightMapArray,
-                    chunk.heightSlice,
-                    chunkSize,
-                    1.0,
-                    linearClampSampler,
-                    _MaxStepsOptimized,
-                    chunk.boundsMin
-                );
-
-            if (chunkHit && hitT < closestT)
-            {
-                closestT = hitT;
-                closestChunk = chunkIndex;
-                closestElevation = elevation;
-
-                // Optional: stop if this hit is before the next cell boundary
-                float nextCellT = min(t_x, t_y);
-                if (closestT <= nextCellT)
-                    return;
-            }
-        }
-
-        if (t_x < t_y)
-        {
-            t = t_x;
-            t_x += deltaT.x;
-        }
-        else
-        {
-            t = t_y;
-            t_y += deltaT.y;
-        }
-    }
-}
-
-
-
-[numthreads(16,16,1)]
+[numthreads(8, 8, 1)]
 void Main(uint3 id : SV_DispatchThreadID)
 {   
     uint2 dims;
@@ -484,10 +71,6 @@ void Main(uint3 id : SV_DispatchThreadID)
 
     float3 cameraPos = _WorldSpaceCameraPos;
     
-    float2 shadowUV = uv;
-    shadowUV.y = 1 - shadowUV.y;
-    float testValue = _HeightMapArray.SampleLevel(linearClampSampler, float3(uv, 0.f), 0.f);
-    
     float elevation = 0;
     float3 col = 0;
     float shadow = 1.f;
@@ -500,46 +83,24 @@ void Main(uint3 id : SV_DispatchThreadID)
     float3 rtColor = _Source.Load(int3(id.x, flippedY, 0)).rgb;
     col.rgb = rtColor;
 
-    float closestT;
-    int closestChunk;
-    float closestElevation;
+    float closestT = 0.f;
+    int closestChunk = -1;
+    float closestElevation = 0.f;
     bool hit = false;
     
-    if(_EnableBVH)
-    {
-         hit = TraceBVHHeightfield(
-        cameraPos,
-        rayDirection,
-        closestT,
-        closestChunk,
-        closestElevation    
-        );
-    }
-    else
-    {
-        hit = TraceChunks(
-        cameraPos,
-        rayDirection,
-        closestT,
-        closestChunk,
-        closestElevation);
-    }
+    hit = TerrainShadows::MarchedTerrain(cameraPos, rayDirection, closestT, closestElevation, closestChunk);
 
-    if (hit)
+    if (hit && closestChunk >= 0)
     {
-        ChunkData hitChunk = _Chunks[closestChunk];
         float3 finalHitPos = cameraPos + rayDirection * closestT;
 
-        shadow = SampleShadowMap(finalHitPos, hitChunk);
+        shadow = TerrainShadows::SampleShadowMap(finalHitPos, closestChunk);
 
         if (_VisualizeTerrain)
-           // col = ((100.f - closestElevation) / 10000.0).xxx;
            col = (closestElevation / 10000.0).xxx;
     }
     
     col.rgb *= shadow.xxx;
-    
+
     _Result[id.xy] = float4(col.rgb, 1.0);
-
-
 }    

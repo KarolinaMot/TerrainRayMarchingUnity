@@ -13,14 +13,14 @@ StructuredBuffer<BVHNode> _Nodes;
 int _NodeCount;
 StructuredBuffer<int> _NodeIndices;
 
-uniform int _ChunkCount;
+uniform uint _ChunkCount;
 uniform float _ShadowEpsilon;
 uniform int _MaxSteps;
 uniform float _DistanceForHit;
 uniform float _ShadowmapResolution;
 static const float SHADOW_DARKNESS = 0.8f;
 
-uniform uint _TerrainShadowsEnabled;
+uniform uint _UseRaymarchOptimization;
 uniform float _SunAngularRadius;
 uniform float _ShadowBlendAlpha;
 uniform float _ShadowDarkness;
@@ -29,11 +29,6 @@ namespace TerrainShadows
 {
     float SampleShadowMap(float3 worldPos, int chunkId)
     {
-        if (_TerrainShadowsEnabled == 0)
-        {
-            return 1.0;
-        }
-        
         float result = 1.f;
         ChunkData chunk = _Chunks[chunkId];
         
@@ -56,7 +51,7 @@ namespace TerrainShadows
         linearClampSampler,
         float3(uv, chunk.heightSlice),
         0);
-        return result + _ShadowDarkness;
+        return lerp(1.0, result, _ShadowDarkness);
     }
     
     bool PointInAABB_XZ(float3 p, float3 bmin, float3 bmax)
@@ -188,97 +183,161 @@ namespace TerrainShadows
 
         return normalize(t * (cos(phi) * sinTheta) + b * (sin(phi) * sinTheta) + axis * cosTheta);
     }
-    
-    bool MarchedShadows(float3 ro, float3 rd, float seedBase, float tminLowRes, bool ignoreHighRes, float2 u)
+      
+    bool MarchedBVH(float3 ro, float3 rd, MarchOptions opt, out float hitT, out float hitHeight, out int chunkIndex)
     {
-        float visibility = 0.0f;
-
         rd = normalize(rd);
+        ro = ro + float3(0, opt.epsilon, 0) + rd * opt.epsilon;
 
-        float3 lightDir = rd;
-        float hitT = 0;
-        bool hit = false;
-        float closestT = 1e20;
-        float closestElevation = 0.0;
-        ro = ro + float3(0, _ShadowEpsilon, 0) + rd * _ShadowEpsilon;
+        hitT = 1e20;
+        hitHeight = 0.0;
+        chunkIndex = -1;
         
-        if (seedBase >= 0)
-        {
-            float cosMax = cos(max(radians(_SunAngularRadius), 1e-6f));
-            //float2 u;
-            
-            //uint seed = seedBase + 9781u;
-            //u = float2(Rand(seed), Rand(seed));
-            
-            rd = SampleConeDirection(rd, cosMax, u);
-        }
-        
+        bool anyHit = false;
+
         int stack[64];
         int stackPtr = 0;
-        stack[stackPtr++] = 0; // root node
-        float3 rcpDir = 1.0 / max(abs(rd), 1e-8) * sign(rd);
+        stack[stackPtr++] = 0;
 
+        float3 rcpDir = 1.0 / max(abs(rd), 1e-8) * sign(rd);
+        float closestWorldT = 1e20;
+        hitT = 1e20;
+        
         while (stackPtr > 0)
         {
             int nodeIndex = stack[--stackPtr];
             BVHNode node = _Nodes[nodeIndex];
 
-            float tLeft, tRight;
-               
-                
             float nodeT;
             if (!RayAABBInv(ro, rcpDir, node.aabbMin, node.aabbMax, nodeT))
                 continue;
 
-            if (nodeT > closestT)
+            if (nodeT > closestWorldT)
                 continue;
 
-            // Leaf node
             if (node.primCount > 0)
             {
                 for (int i = 0; i < node.primCount; i++)
                 {
-                    int chunkIndex = _NodeIndices[node.firstPrim + i];
-                    ChunkData chunk = _Chunks[chunkIndex];
+                    int testChunkIndex = _NodeIndices[node.firstPrim + i];
+                    ChunkData chunk = _Chunks[testChunkIndex];
 
                     if (chunk.heightSlice < 0)
                         continue;
 
-                    float chunkT;
                     float3 roLocal = mul(chunk.worldToLocal, float4(ro, 1.0)).xyz;
                     float3 rdLocal = normalize(mul((float3x3) chunk.worldToLocal, rd));
-                    if (RayAABB(roLocal, rdLocal, chunk.boundsMin, chunk.boundsMax, chunkT))
+
+                    float chunkT;
+                    if (!RayAABB(roLocal, rdLocal, chunk.boundsMin, chunk.boundsMax, chunkT))
+                        continue;
+
+                    float2 chunkSize = (chunk.boundsMax - chunk.boundsMin).xz;
+
+                    float testT = 0.0;
+                    float testHeight = 0.0;
+                    bool hit = false;
+                    
+                    if(_UseRaymarchOptimization)
                     {
-                        float elevation = 0.f;
-                        float2 chunkSize = ((chunk.boundsMax - chunk.boundsMin)).xz;
-                        bool isHighRes = chunk.isHighRes > 0;
+                        hit = TraverseHeightfieldMaxMip(
+                            roLocal,
+                            rdLocal,
+                            testT,
+                            testHeight,
+                            _DistanceForHit,
+                            _HeightMapArray,
+                            chunk.heightSlice,
+                            chunkSize,
+                            1.0,
+                            linearClampSampler,
+                            _MaxSteps,
+                            _ShadowEpsilon,
+                            chunk.boundsMin,
+                            opt
+                            );
+                    }
+                    else
+                    {
+                        hit = RaymarchChunk(
+                            roLocal,
+                            rdLocal,
+                            testT,
+                            testHeight,
+                            _MaxSteps,
+                            _DistanceForHit,
+                            1e-2,
+                            chunkSize,
+                            1.0,
+                            chunk.boundsMin,
+                            _HeightMapArray,
+                            chunk.heightSlice,
+                            linearClampSampler
+                            );
+                    }
 
-                        //hit = TraverseHeightfieldMaxMipShadowChunk(roLocal, rdLocal, hitT, elevation,
-                        //    _DistanceForHit, _HeightMapArray, chunk.heightSlice, chunkSize,
-                        //    linearClampSampler, _MaxSteps, _ShadowEpsilon, chunk.boundsMin,
-                        //    isHighRes, tminLowRes, chunk.localToWorld, ro);
-                        hit = RaymarchChunk(roLocal, rdLocal, hitT, elevation, _MaxSteps, _DistanceForHit, 1e-2, chunkSize, 1.f, chunk.boundsMin, _HeightMapArray, chunk.heightSlice, linearClampSampler,
-                        isHighRes, tminLowRes, chunk.localToWorld, ro);
+                    if (hit)
+                    {
+                        float3 hitPosGrid = roLocal + rdLocal * testT;
+                        float3 hitPosWorld = mul(chunk.localToWorld, float4(hitPosGrid, 1.0)).xyz;
+                        float testWorldT = distance(ro, hitPosWorld);
 
-                        if (hit)
+                        if (testWorldT < closestWorldT)
                         {
-                            return true;
+                            closestWorldT = testWorldT;
+                            hitT = testWorldT;
+                            hitHeight = testHeight;
+                            chunkIndex = testChunkIndex;
+                            anyHit = true;
                         }
                     }
                 }
             }
             else
             {
-                stack[stackPtr++] = node.leftChild;
-                stack[stackPtr++] = node.rightChild;
+                if (node.leftChild >= 0)
+                    stack[stackPtr++] = node.leftChild;
+
+                if (node.rightChild >= 0)
+                    stack[stackPtr++] = node.rightChild;
             }
         }
 
-
-    
-        return false;
+        return anyHit;
     }
+    
+    bool MarchedTerrain(float3 ro, float3 rd, out float hitT, out float elevation, out int hitChunkIndex)
+    {
+        MarchOptions opt;
+        opt.isShadow = false;
+        opt.useMaxMipOptimization = _UseRaymarchOptimization;
+        opt.seedBase = -1.0;
+        opt.randomU = 0.0;
+        opt.epsilon = _ShadowEpsilon;
 
+        return MarchedBVH(ro, rd, opt, hitT, elevation, hitChunkIndex);
+    }
+    
+    //In my internship code ignoreHighRes and tminLowRes are used to manage chunk LODs, but those are not present in this demo
+    bool MarchedShadows(
+    float3 ro,
+    float3 rd,
+    float seedBase,
+    float tminLowRes,
+    bool ignoreHighRes,
+    float2 u)
+    {
+        MarchOptions opt;
+        opt.isShadow = true;
+        opt.useMaxMipOptimization = _UseRaymarchOptimization;
+        opt.seedBase = seedBase;
+        opt.randomU = u;
+        opt.epsilon = _ShadowEpsilon;
+        float hitT, elevation;
+        int hitIndex;
+        return MarchedBVH(ro, rd, opt, hitT, elevation, hitIndex);
+    }
+    
 }
 
 

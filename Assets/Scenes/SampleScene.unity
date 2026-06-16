@@ -133,8 +133,6 @@ GameObject:
   - component: {fileID: 330585547}
   - component: {fileID: 330585551}
   - component: {fileID: 330585549}
-  - component: {fileID: 330585554}
-  - component: {fileID: 330585553}
   - component: {fileID: 330585548}
   m_Layer: 0
   m_Name: Main Camera
@@ -273,13 +271,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7817cd5ecbb5e284189d7664215d815b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  enableBVH: 1
-  visualizeTerrain: 1
+  heightmapDimensions: 256
+  shadowmapDimensions: 256
+  parentTerrain: {fileID: 919132149423648781}
   maxSteps: 4096
-  maxStepsOptimized: 1000
-  distanceForHit: 0.00001
-  optimizeTracing: 1
-  terrainTransform: {fileID: 832828462}
+  distanceForHit: 0.2
+  shadowEpsilon: 0.5
+  shadowUpdateFrequency: 4
+  shadowSoftness: 0.2
+  shadowDarkness: 0
+  shadowBlendAlpha: 0.5
 --- !u!114 &330585549
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -310,57 +311,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   blueNoise: {fileID: 18700000, guid: ce7ed781b34629845b5875625cde4336, type: 3}
---- !u!114 &330585553
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 330585543}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 449899b156aceb24c961da1c4848cd23, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  convergeShadows: 1
-  shadowMapResolution: 526
-  distanceForHit: -1.01
-  sunAngularRadius: 0.58
-  shadowEpsilon: 0.2
-  maxSteps: 256
-  convergenceLimit: 50
-  worldToLightClip:
-    e00: 0.0017295054
-    e01: 0
-    e02: 0
-    e03: -0.8647527
-    e10: 0
-    e11: -0.001246509
-    e12: -0.0014767622
-    e13: 0.80951387
-    e20: 0
-    e21: -0.00095461414
-    e22: 0.00080577296
-    e23: 0.15158899
-    e30: 0
-    e31: 0
-    e32: 0
-    e33: 1
-  rtShadowArray:
-  - {fileID: 0}
-  - {fileID: 0}
---- !u!114 &330585554
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 330585543}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: da2761bc8e7f7cb439cb9fbfc1261d97, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
 --- !u!1 &410087039
 GameObject:
   m_ObjectHideFlags: 0
@@ -482,11 +432,6 @@ MonoBehaviour:
   m_LightCookieSize: {x: 1, y: 1}
   m_LightCookieOffset: {x: 0, y: 0}
   m_SoftShadowQuality: 1
---- !u!4 &832828462 stripped
-Transform:
-  m_CorrespondingSourceObject: {fileID: 1151388028547126963, guid: 839e5eb85092ed249a0389dcda17bd01, type: 3}
-  m_PrefabInstance: {fileID: 1841816531}
-  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1285532668
 GameObject:
   m_ObjectHideFlags: 0
