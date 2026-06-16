@@ -274,13 +274,15 @@ MonoBehaviour:
   heightmapDimensions: 256
   shadowmapDimensions: 256
   parentTerrain: {fileID: 919132149423648781}
+  visualizeTerrain: 1
+  useMaxMipOptimization: 1
   maxSteps: 4096
-  distanceForHit: 0.2
+  distanceForHit: 0.1
   shadowEpsilon: 0.5
   shadowUpdateFrequency: 4
-  shadowSoftness: 0.2
-  shadowDarkness: 0
-  shadowBlendAlpha: 0.5
+  shadowSoftness: 0.5
+  shadowDarkness: 0.8
+  shadowBlendAlpha: 0.9
 --- !u!114 &330585549
 MonoBehaviour:
   m_ObjectHideFlags: 0

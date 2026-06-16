@@ -112,6 +112,10 @@ void Main(uint3 id : SV_DispatchThreadID)
 
     float2 u = Random::UniformFloat2(rng);
     
+    float cosMax = cos(max(radians(_SunAngularRadius), 1e-6f));
+ 
+    rd = TerrainShadows::SampleConeDirection(rd, cosMax, u);
+    
     float shadowed = TerrainShadows::MarchedShadows(pWs, rd, seed, 100.f, false, u) ? 0.0 : 1.0;
     
     float shadowedHistory = saturate(_Result.Load(uint4(x, y, chunk.heightSlice, 0)));
