@@ -12,6 +12,9 @@ int _ChunkIndex;
 [numthreads(8, 8, 1)]
 void Main(uint3 id : SV_DispatchThreadID)
 {
+    if (_ChunkCount <= 0)
+        return;
+
     uint4 dims;
     _Result.GetDimensions(dims.x, dims.y, dims.z);
 

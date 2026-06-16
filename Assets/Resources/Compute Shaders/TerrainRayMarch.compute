@@ -42,6 +42,9 @@ float3 ReconstructWorldPos(uint2 pixel, uint2 dims)
 [numthreads(8, 8, 1)]
 void Main(uint3 id : SV_DispatchThreadID)
 {   
+    if (_ChunkCount <=0)
+        return;
+    
     uint2 dims;
     _Result.GetDimensions(dims.x, dims.y);
     
@@ -97,7 +100,7 @@ void Main(uint3 id : SV_DispatchThreadID)
         shadow = TerrainShadows::SampleShadowMap(finalHitPos, closestChunk);
 
         if (_VisualizeTerrain)
-           col = (closestElevation / 10000.0).xxx;
+           col = (closestElevation / 1000.0).xxx;
     }
     
     col.rgb *= shadow.xxx;

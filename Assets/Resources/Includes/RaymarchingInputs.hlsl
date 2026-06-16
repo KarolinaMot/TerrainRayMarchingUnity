@@ -214,7 +214,7 @@ namespace TerrainShadows
 
             if (nodeT > closestWorldT)
                 continue;
-
+            
             if (node.primCount > 0)
             {
                 for (int i = 0; i < node.primCount; i++)

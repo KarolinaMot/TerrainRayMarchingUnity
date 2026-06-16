@@ -56,7 +56,8 @@ public class TileBVH
         BVHNode root = new BVHNode();
         root.firstPrim = 0;
         root.primCount = chunkCount;
-        root.leftChild = root.rightChild = 0;
+        root.leftChild = -1;
+        root.rightChild = -1;
         nodes.Add(root);
 
         UpdateNodeBounds(roodNodeID, chunks);
@@ -98,7 +99,7 @@ public class TileBVH
             else
             {
                 // Internal: bounds from children
-                if (node.leftChild > 0)
+                if (node.leftChild >= 0)
                 {
                     BVHNode left = nodes[node.leftChild];
 
@@ -106,7 +107,7 @@ public class TileBVH
                     node.aabbMax = Vector3.Max(node.aabbMax, left.aabbMax);
                 }
 
-                if (node.rightChild > 0)
+                if (node.rightChild >= 0)
                 {
                     BVHNode right = nodes[node.rightChild];
 
@@ -233,11 +234,15 @@ public class TileBVH
 
         leftChildNode.firstPrim = node.firstPrim;
         leftChildNode.primCount = leftCount;
-        leftChildNode.leftChild = leftChildNode.rightChild = 0;
+        leftChildNode.leftChild = -1;
+        leftChildNode.rightChild = -1;
+
 
         rightChildNode.firstPrim = i;
         rightChildNode.primCount = node.primCount - leftCount;
-        rightChildNode.leftChild = rightChildNode.rightChild = 0;
+        rightChildNode.leftChild = -1;
+        rightChildNode.rightChild = -1;
+
         node.primCount = 0;
 
         nodes[nodeIdx] = node;
